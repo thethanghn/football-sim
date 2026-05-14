@@ -1061,6 +1061,9 @@
                 this.teamInstruction = 'neutral'; // kept for legacy compat
                 this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed' };
                 this.momentum = 50; // 0=CPU dominates, 100=player dominates
+                this._attackPhase = null; // null | 'buildup' | 'progression' | 'danger'
+                this._attackTeam  = null; // 'player' | 'cpu'
+                this._phaseTicks  = 0;
                 this.rules = new FootballRules();
                 console.log('Creating PitchRenderer...');
                 this.pitchRenderer = new PitchRenderer();
@@ -1394,18 +1397,11 @@
                     console.log('CPU squad set up successfully');
 
                     console.log('Updating UI...');
-                    document.getElementById('playerFormation').textContent = this.playerFormation;
-                    document.getElementById('cpuFormation').textContent = this.cpuFormation;
-
                     // Inject crests and club names
                     document.getElementById('playerTeamDisplay').innerHTML =
                         `${this.playerTeam.crestSVG}<div class="match-team-name">${this.playerTeam.clubName}</div>`;
                     document.getElementById('cpuTeamDisplay').innerHTML =
                         `${this.cpuTeam.crestSVG}<div class="match-team-name">${this.cpuTeam.clubName}</div>`;
-                    document.getElementById('playerCrestSm').innerHTML  = this.playerTeam.crestSVGSm;
-                    document.getElementById('cpuCrestSm').innerHTML     = this.cpuTeam.crestSVGSm;
-                    document.getElementById('playerClubName').textContent = this.playerTeam.clubName;
-                    document.getElementById('cpuClubName').textContent   = this.cpuTeam.clubName;
 
                     // Show manage team button during match
                     document.getElementById('manageBtn').style.display = 'block';
@@ -1573,106 +1569,210 @@
             }
 
             generateEvent() {
-                // Step 1: midfield battle determines possession
+                // Rare: late-game special events interrupt any phase
+                if (this.timeRemaining < 35 && Math.random() < 0.03) {
+                    this._attackPhase = null; this.substitutionEvent(); return;
+                }
+                if (this.timeRemaining < 45 && Math.random() < 0.02) {
+                    this._attackPhase = null; this.injuryEvent(); return;
+                }
+
+                if (!this._attackPhase)                    this._beginPossession();
+                else if (this._attackPhase === 'buildup')  this._doBuildup();
+                else if (this._attackPhase === 'progression') this._doProgression();
+                else                                       this._doDanger();
+            }
+
+            // ── Midfield battle: determines who wins possession, starts an attack ────
+            _beginPossession() {
                 const pZones = this.getZoneRatings(this.playerTeam, this.playerFormation);
                 const cZones = this.getZoneRatings(this.cpuTeam, this.cpuFormation);
 
-                // ── Tactic modifiers ──────────────────────────────────────
-                // Mentality: 5-level scale affects midfield positioning + atk/def efficiency
                 const mentalityInstr = { 'ultra-def': -16, 'defensive': -8, 'normal': 0, 'attacking': 8, 'gung-ho': 16 };
-                const instrMod = mentalityInstr[this.tactics.mentality] || 0;
+                const instrMod       = mentalityInstr[this.tactics.mentality] || 0;
+                const closingMod     = { 'always': 8, 'standard': 0, 'stand-off': -5, 'own-half': 2 };
+                const pressingBoost  = closingMod[this.tactics.closingDown] || 0;
 
-                // Closing down: pressing intensity shifts midfield balance
-                const closingMod = { 'always': 8, 'standard': 0, 'stand-off': -5, 'own-half': 2 };
-                const pressingBoost = closingMod[this.tactics.closingDown] || 0;
-
-                // Passing style: direct = riskier but sharper attacks; short = safer possession
-                const passDanger = { 'direct': 1.10, 'mixed': 1.0, 'short': 0.92 };
-                const passRetain = { 'direct': 0.93, 'mixed': 1.0, 'short': 1.07 };
-
-                // Mentality attack/defense multipliers
-                const atkMultMap = { 'ultra-def': 0.78, 'defensive': 0.90, 'normal': 1.0, 'attacking': 1.12, 'gung-ho': 1.28 };
-                const defMultMap = { 'ultra-def': 1.28, 'defensive': 1.12, 'normal': 1.0, 'attacking': 0.90, 'gung-ho': 0.78 };
-
-                // Midfield contest decides who gets the ball
-                const pMid = pZones.midfield + instrMod + pressingBoost + (this.momentum - 50) * 0.15;
-                const cMid = cZones.midfield - instrMod;
+                const pMid    = pZones.midfield + instrMod + pressingBoost + (this.momentum - 50) * 0.15;
+                const cMid    = cZones.midfield - instrMod;
                 const midTotal = pMid + cMid;
                 const playerHasBall = Math.random() < (midTotal > 0 ? pMid / midTotal : 0.5);
-                const possession = playerHasBall ? 'player' : 'cpu';
+                const possession    = playerHasBall ? 'player' : 'cpu';
 
-                // Update possession stat based on midfield dominance
-                const possBias = (pMid / (midTotal || 1)) * 40 + 30; // 30–70%
+                // Update possession stat
+                const possBias = (pMid / (midTotal || 1)) * 40 + 30;
                 this.stats.playerPossession = Math.round(this.stats.playerPossession * 0.9 + possBias * 0.1);
                 this.updatePossession();
 
-                // Step 2: attacking team attacks vs defending team defense
-                const atkZone  = playerHasBall ? pZones.attack  : cZones.attack;
-                const defZone  = playerHasBall ? cZones.defense : pZones.defense;
-                const attackRating = atkZone + (this.momentum - 50) * (playerHasBall ? 0.2 : -0.2);
-                const defendRating = defZone;
+                // Card events are possession-neutral: don't reset the attack flow
+                const scoreDiff = this.playerScore - this.cpuScore;
+                const chaseMod  = playerHasBall ? (scoreDiff < -1 ? 0.03 : 0) : (scoreDiff > 1 ? 0.03 : 0);
+                if (Math.random() < 0.04 + chaseMod) {
+                    this.cardEvent(possession === 'player' ? 'cpu' : 'player');
+                    return; // Phase stays null; next tick re-battles
+                }
 
-                // Apply mentality multipliers: player's tactics affect player's attack AND defense
-                const atkMult = atkMultMap[this.tactics.mentality] || 1.0;
-                const defMult = defMultMap[this.tactics.mentality] || 1.0;
-                const passMult = playerHasBall ? (passDanger[this.tactics.passing] || 1.0) : (passRetain[this.tactics.passing] || 1.0);
-                const effAtk = attackRating * (playerHasBall ? atkMult * passMult : 1.0);
-                const effDef = defendRating * (playerHasBall ? 1.0 : defMult);
+                // Visual: show the ball changing hands
+                if (this.matchFlow) this.matchFlow.onEvent('possession', { team: possession });
 
-                const attackScore = effAtk / (effAtk + effDef + 0.01);
+                this._attackTeam = possession;
+                this._phaseTicks = 0;
 
-                // Step 3: determine event type from attack score
+                // Gung-ho / direct teams launch immediately, skipping patient buildup
+                const skipChance = possession === 'player'
+                    ? ({ 'gung-ho': 0.40, 'attacking': 0.20, 'normal': 0, 'defensive': 0, 'ultra-def': 0 }[this.tactics.mentality] || 0)
+                      + ({ 'direct': 0.20, 'mixed': 0, 'short': 0 }[this.tactics.passing] || 0)
+                    : 0;
+
+                this._attackPhase = Math.random() < skipChance ? 'progression' : 'buildup';
+            }
+
+            // ── Buildup phase: working ball out from defense / own half ───────────────
+            _doBuildup() {
+                const team = this._attackTeam;
+                const opp  = team === 'player' ? 'cpu' : 'player';
+                this._phaseTicks++;
+
+                // High press by opponent: chance to steal the ball in deep buildup
+                const defTeamObj = opp === 'player' ? this.playerTeam : this.cpuTeam;
+                const defZones   = this.getZoneRatings(defTeamObj, opp === 'player' ? this.playerFormation : this.cpuFormation);
+                const pressMod   = opp === 'player'
+                    ? ({ 'always': 1.40, 'standard': 1.0, 'stand-off': 0.60, 'own-half': 0.75 }[this.tactics.closingDown] || 1.0)
+                    : 1.0;
+                const turnoverChance = (defZones.midfield / 100) * pressMod * 0.18;
+
+                if (Math.random() < turnoverChance) {
+                    this.tackleEvent(opp);   // defense presses and wins the ball
+                    this._attackTeam  = opp;
+                    this._attackPhase = 'buildup';
+                    this._phaseTicks  = 0;
+                    return;
+                }
+
+                // Ball briefly out of play — team retains via throw-in, slight delay
+                if (Math.random() < 0.06) {
+                    this.throwInEvent(team);
+                    return; // Stay in buildup, same tick count
+                }
+
+                // How many buildup passes before pushing forward (tactic-driven)
+                const maxBuildup = team === 'player'
+                    ? ({ 'short': 3, 'mixed': 2, 'direct': 1 }[this.tactics.passing] || 2)
+                    : 2;
+
+                if (this._phaseTicks >= maxBuildup) {
+                    this.passEvent(team);        // final ball over the top / into midfield
+                    this._attackPhase = 'progression';
+                    this._phaseTicks  = 0;
+                } else {
+                    this.passEvent(team);        // safe pass, staying in own half
+                }
+            }
+
+            // ── Progression phase: pushing into the attacking third ───────────────────
+            _doProgression() {
+                const team = this._attackTeam;
+                const opp  = team === 'player' ? 'cpu' : 'player';
+                this._phaseTicks++;
+
+                const defTeamObj = opp === 'player' ? this.playerTeam : this.cpuTeam;
+                const defZones   = this.getZoneRatings(defTeamObj, opp === 'player' ? this.playerFormation : this.cpuFormation);
+                const pressMod   = opp === 'player'
+                    ? ({ 'always': 1.30, 'standard': 1.0, 'stand-off': 0.65, 'own-half': 0.80 }[this.tactics.closingDown] || 1.0)
+                    : 1.0;
+                const interceptionChance = (defZones.defense / 100) * pressMod * 0.20;
+
                 const r = Math.random();
 
-                // Rare: late-game sub/injury (after first half equivalent)
-                if (this.timeRemaining < 35 && r < 0.04) {
-                    this.substitutionEvent(); return;
-                }
-                if (this.timeRemaining < 45 && r < 0.03) {
-                    this.injuryEvent(); return;
+                if (r < interceptionChance) {
+                    if (r < interceptionChance * 0.65) {
+                        // Defense wins ball cleanly in the final third
+                        this.tackleEvent(opp);
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                    } else {
+                        // Defense clears — ball goes out for a corner
+                        this.cornerEvent(team);
+                        this._attackPhase = null;
+                        this._attackTeam  = null;
+                        this._phaseTicks  = 0;
+                    }
+                    return;
                 }
 
-                // Card chance: slight if foul territory; higher when chasing game
-                const scoreDiff = this.playerScore - this.cpuScore;
-                const chaseMod = playerHasBall ? (scoreDiff < -1 ? 0.03 : 0) : (scoreDiff > 1 ? 0.03 : 0);
-                if (r < 0.04 + chaseMod) {
-                    this.cardEvent(possession === 'player' ? 'cpu' : 'player'); return;
-                }
+                // How long to build in the final third before forcing a shot
+                const menMod = team === 'player'
+                    ? ({ 'gung-ho': 0, 'attacking': 0, 'normal': 1, 'defensive': 2, 'ultra-def': 2 }[this.tactics.mentality] ?? 1)
+                    : 1;
+                const pasMod = team === 'player'
+                    ? ({ 'direct': 0, 'mixed': 0, 'short': 1 }[this.tactics.passing] ?? 0)
+                    : 0;
+                const maxProg = menMod + pasMod; // 0–3
 
-                // Based on attack score, how dangerous is this attack?
-                if (attackScore > 0.62) {
-                    // Strong attack
-                    const r2 = Math.random();
-                    if (r2 < 0.25)       this.goalEvent(possession);
-                    else if (r2 < 0.55)  this.chanceEvent(possession);
-                    else if (r2 < 0.70)  this.missedChanceEvent(possession);
-                    else if (r2 < 0.80)  this.barEvent(possession);
-                    else if (r2 < 0.88)  this.cornerEvent(possession);
-                    else if (r2 < 0.93)  this.saveEvent();
-                    else                 this.passEvent(possession);
-                } else if (attackScore > 0.48) {
-                    // Balanced attack
-                    const r2 = Math.random();
-                    if (r2 < 0.10)       this.goalEvent(possession);
-                    else if (r2 < 0.30)  this.chanceEvent(possession);
-                    else if (r2 < 0.45)  this.passEvent(possession);
-                    else if (r2 < 0.58)  this.tackleEvent(possession === 'player' ? 'cpu' : 'player');
-                    else if (r2 < 0.68)  this.missedChanceEvent(possession);
-                    else if (r2 < 0.76)  this.cornerEvent(possession);
-                    else if (r2 < 0.83)  this.throwInEvent(possession);
-                    else if (r2 < 0.90)  this.saveEvent();
-                    else                 this.possessionChange();
+                if (this._phaseTicks > maxProg) {
+                    this.passEvent(team);        // final ball into the danger zone
+                    this._attackPhase = 'danger';
+                    this._phaseTicks  = 0;
                 } else {
-                    // Weak attack / strong defense
-                    const r2 = Math.random();
-                    if (r2 < 0.04)       this.goalEvent(possession);
-                    else if (r2 < 0.14)  this.chanceEvent(possession);
-                    else if (r2 < 0.30)  this.tackleEvent(possession === 'player' ? 'cpu' : 'player');
-                    else if (r2 < 0.50)  this.passEvent(possession);
-                    else if (r2 < 0.60)  this.throwInEvent(possession);
-                    else if (r2 < 0.68)  this.cornerEvent(possession);
-                    else if (r2 < 0.78)  this.saveEvent();
-                    else                 this.possessionChange();
+                    this.passEvent(team);        // patient build-up in the final third
+                }
+            }
+
+            // ── Danger phase: shot situation — always ends the attack sequence ────────
+            _doDanger() {
+                const team = this._attackTeam;
+                const opp  = team === 'player' ? 'cpu' : 'player';
+
+                // Reset state first so any re-entrant call (goalEvent → missedChanceEvent) is clean
+                this._attackPhase = null;
+                this._attackTeam  = null;
+                this._phaseTicks  = 0;
+
+                const pZones = this.getZoneRatings(this.playerTeam, this.playerFormation);
+                const cZones = this.getZoneRatings(this.cpuTeam, this.cpuFormation);
+
+                const atkZone  = team === 'player' ? pZones.attack  : cZones.attack;
+                const defZone  = team === 'player' ? cZones.defense : pZones.defense;
+
+                const atkMult  = team === 'player'
+                    ? ({ 'ultra-def': 0.78, 'defensive': 0.90, 'normal': 1.0, 'attacking': 1.12, 'gung-ho': 1.28 }[this.tactics.mentality] || 1.0)
+                    : 1.0;
+                const defMult  = team === 'player' ? 1.0
+                    : ({ 'ultra-def': 1.28, 'defensive': 1.12, 'normal': 1.0, 'attacking': 0.90, 'gung-ho': 0.78 }[this.tactics.mentality] || 1.0);
+                const passMult = team === 'player'
+                    ? ({ 'direct': 1.10, 'mixed': 1.0, 'short': 0.92 }[this.tactics.passing] || 1.0)
+                    : 1.0;
+
+                const moMod    = (this.momentum - 50) * (team === 'player' ? 0.2 : -0.2);
+                const effAtk   = atkZone * atkMult * passMult + moMod;
+                const effDef   = defZone * defMult;
+                const attackScore = effAtk / (effAtk + effDef + 0.01);
+
+                const r2 = Math.random();
+
+                if (attackScore > 0.62) {
+                    if (r2 < 0.28)       this.goalEvent(team);
+                    else if (r2 < 0.55)  this.chanceEvent(team);
+                    else if (r2 < 0.68)  this.missedChanceEvent(team);
+                    else if (r2 < 0.78)  this.barEvent(team);
+                    else if (r2 < 0.86)  this.cornerEvent(team);
+                    else                 this.saveEvent();
+                } else if (attackScore > 0.48) {
+                    if (r2 < 0.12)       this.goalEvent(team);
+                    else if (r2 < 0.32)  this.chanceEvent(team);
+                    else if (r2 < 0.50)  this.missedChanceEvent(team);
+                    else if (r2 < 0.64)  this.saveEvent();
+                    else if (r2 < 0.76)  this.barEvent(team);
+                    else if (r2 < 0.88)  this.cornerEvent(team);
+                    else                 this.tackleEvent(opp);
+                } else {
+                    if (r2 < 0.05)       this.goalEvent(team);
+                    else if (r2 < 0.16)  this.chanceEvent(team);
+                    else if (r2 < 0.38)  this.saveEvent();
+                    else if (r2 < 0.58)  this.missedChanceEvent(team);
+                    else if (r2 < 0.72)  this.cornerEvent(team);
+                    else                 this.tackleEvent(opp);
                 }
             }
 
@@ -2651,6 +2751,9 @@
                 this.teamInstruction = 'neutral';
                 this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed' };
                 this.momentum = 50;
+                this._attackPhase = null;
+                this._attackTeam  = null;
+                this._phaseTicks  = 0;
                 this.rules.reset();
                 this.stats = {
                     playerShots: 0,
