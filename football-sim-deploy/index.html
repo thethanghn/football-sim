@@ -109,8 +109,8 @@
 
         .formations {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
             margin-bottom: 20px;
         }
 
@@ -554,6 +554,122 @@
             transform: scale(1.03);
         }
 
+        /* ── CM 03/04 Tactic Rows ─── */
+        .tactic-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 7px;
+        }
+        .tactic-row:last-child { margin-bottom: 0; }
+        .tactic-label {
+            color: var(--c-text-2);
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            width: 50px;
+            flex-shrink: 0;
+            text-align: right;
+        }
+        .tactic-options { display: flex; gap: 3px; flex: 1; }
+        .tactic-btn {
+            flex: 1;
+            padding: 5px 2px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--c-border-subtle);
+            border-radius: var(--r-sm);
+            color: var(--c-text-3);
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            transition: all var(--t-fast);
+            white-space: nowrap;
+        }
+        .tactic-btn:hover:not(.active) {
+            background: rgba(255,215,0,0.08);
+            color: var(--c-text-1);
+            border-color: rgba(255,215,0,0.4);
+        }
+        .tactic-btn.active {
+            background: rgba(255,215,0,0.15);
+            border-color: var(--c-gold);
+            color: var(--c-gold);
+        }
+
+        /* ── CM-Style Formation Pitch ── */
+        .fm-pitch {
+            position: relative;
+            flex: 1;
+            min-height: 260px;
+            overflow: hidden;
+            background: #1e6b30;
+            background-image: repeating-linear-gradient(
+                180deg,
+                rgba(0,0,0,0) 0px, rgba(0,0,0,0) 30px,
+                rgba(0,0,0,0.07) 30px, rgba(0,0,0,0.07) 60px
+            );
+        }
+        .fm-field-lines { position: absolute; inset: 0; pointer-events: none; }
+        .fm-line-center {
+            position: absolute; left: 6%; right: 6%; top: 50%;
+            height: 1px; background: rgba(255,255,255,0.18);
+        }
+        .fm-circle-center {
+            position: absolute; left: 50%; top: 50%;
+            transform: translate(-50%,-50%);
+            width: 46px; height: 46px;
+            border: 1px solid rgba(255,255,255,0.18); border-radius: 50%;
+        }
+        .fm-box-top {
+            position: absolute; left: 24%; right: 24%; top: 0; height: 13%;
+            border: 1px solid rgba(255,255,255,0.15); border-top: none;
+        }
+        .fm-box-bot {
+            position: absolute; left: 24%; right: 24%; bottom: 0; height: 13%;
+            border: 1px solid rgba(255,255,255,0.15); border-bottom: none;
+        }
+        .fm-player-slot {
+            position: absolute;
+            background: rgba(0,0,0,0.62);
+            border: 1.5px solid rgba(255,255,255,0.36);
+            border-radius: 3px;
+            color: #fff; text-align: center;
+            padding: 4px 3px 3px; cursor: pointer;
+            width: 54px;
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+            font-family: inherit; z-index: 1;
+        }
+        .fm-player-slot:hover {
+            background: rgba(255,215,0,0.22);
+            border-color: rgba(255,215,0,0.7);
+        }
+        .fm-player-slot.selected {
+            background: rgba(255,215,0,0.30);
+            border-color: var(--c-gold);
+            box-shadow: 0 0 8px rgba(255,215,0,0.50);
+        }
+        .fm-player-avatar { display: block; flex-shrink: 0; line-height: 0; }
+        .fm-player-avatar svg { width: 34px !important; height: 34px !important; border-radius: 2px; }
+        .fm-player-name {
+            display: block; font-size: 7.5px; font-weight: 700;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            width: 100%; text-transform: uppercase; letter-spacing: 0.2px; line-height: 1.2;
+        }
+        .fm-player-meta {
+            display: block; font-size: 7px; color: rgba(255,255,255,0.58); line-height: 1.2;
+        }
+        .fm-player-slot.selected .fm-player-meta { color: rgba(255,215,0,0.75); }
+        .fm-formation-label {
+            position: absolute; bottom: 4px; right: 6px;
+            font-size: 10px; font-weight: 700;
+            color: rgba(255,255,255,0.28); letter-spacing: 1px;
+            pointer-events: none; z-index: 2;
+        }
+
         /* ── Sub / Management Info ─── */
         .management-info {
             background: var(--c-bg-2);
@@ -994,13 +1110,25 @@
                     4-3-3
                     <div class="formation-desc">Offensive</div>
                 </button>
+                <button class="formation-btn" data-formation="451" onclick="window.game.selectFormation(this)">
+                    4-5-1
+                    <div class="formation-desc">Midfield</div>
+                </button>
                 <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)">
                     5-3-2
                     <div class="formation-desc">Defensive</div>
                 </button>
+                <button class="formation-btn" data-formation="541" onclick="window.game.selectFormation(this)">
+                    5-4-1
+                    <div class="formation-desc">Ultra Def</div>
+                </button>
+                <button class="formation-btn" data-formation="352" onclick="window.game.selectFormation(this)">
+                    3-5-2
+                    <div class="formation-desc">Mid Power</div>
+                </button>
                 <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)">
                     3-4-3
-                    <div class="formation-desc">Balanced</div>
+                    <div class="formation-desc">Attack</div>
                 </button>
             </div>
             <div class="buttons">
@@ -1470,10 +1598,10 @@
             <div id="mobilePlayerDetail"></div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; flex: 1; overflow: hidden; min-height: 0;">
-                <!-- LEFT COLUMN: STARTING XI -->
-                <div class="squad-section">
-                    <div class="squad-title">⚽ STARTING XI</div>
-                    <div class="squad-list" id="startingXIList"></div>
+                <!-- LEFT COLUMN: FORMATION PITCH VIEW -->
+                <div class="squad-section" style="padding: 0; overflow: hidden; display: flex; flex-direction: column;">
+                    <div class="squad-title" style="border-radius: 0; flex-shrink: 0;">⚽ STARTING XI</div>
+                    <div id="formationPitch" class="fm-pitch"></div>
                 </div>
 
                 <!-- CENTER COLUMN: FORMATION (PRE-MATCH) / DETAILS / INSTRUCTIONS / CONTROLS -->
@@ -1481,11 +1609,14 @@
                     <!-- Formation Selector (pre-match only) -->
                     <div id="mgmtFormationSelector" style="flex-shrink: 0; display: none;">
                         <div style="color: #FFD700; font-weight: bold; font-size: 11px; text-align: center; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 1px;">⚙ Formation</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                            <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">4-4-2<div class="formation-desc">Balanced</div></button>
-                            <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">4-3-3<div class="formation-desc">Offensive</div></button>
-                            <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">5-3-2<div class="formation-desc">Defensive</div></button>
-                            <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">3-4-3<div class="formation-desc">Attack</div></button>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;">
+                            <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-4-2<div class="formation-desc">Balanced</div></button>
+                            <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-3-3<div class="formation-desc">Offensive</div></button>
+                            <button class="formation-btn" data-formation="451" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-5-1<div class="formation-desc">Midfield</div></button>
+                            <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">5-3-2<div class="formation-desc">Defensive</div></button>
+                            <button class="formation-btn" data-formation="541" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">5-4-1<div class="formation-desc">Ultra Def</div></button>
+                            <button class="formation-btn" data-formation="352" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-5-2<div class="formation-desc">Mid Power</div></button>
+                            <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-4-3<div class="formation-desc">Attack</div></button>
                         </div>
                     </div>
 
@@ -1512,13 +1643,47 @@
                         <button class="close-detail-btn" id="closeDetailBtn" style="display: none;">Close Details</button>
                     </div>
 
-                    <!-- Instructions -->
+                    <!-- Tactics Panel (CM 03/04 style) -->
                     <div class="instruction-panel" id="instructionPanel" style="flex-shrink: 0;">
-                        <div class="instruction-title">⚔️ Team Instructions</div>
-                        <div class="instruction-buttons">
-                            <button class="instruction-btn defensive active" data-instruction="defensive">🛡️ DEFENSIVE</button>
-                            <button class="instruction-btn neutral" data-instruction="neutral">⚖️ NEUTRAL</button>
-                            <button class="instruction-btn offensive" data-instruction="offensive">⚡ OFFENSIVE</button>
+                        <div class="instruction-title">⚔ Tactics</div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Mentality</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="mentality" data-value="ultra-def">U.Def</button>
+                                <button class="tactic-btn" data-tactic="mentality" data-value="defensive">Def</button>
+                                <button class="tactic-btn active" data-tactic="mentality" data-value="normal">Normal</button>
+                                <button class="tactic-btn" data-tactic="mentality" data-value="attacking">Attack</button>
+                                <button class="tactic-btn" data-tactic="mentality" data-value="gung-ho">GungHo</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Pressing</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="closingDown" data-value="always">Always</button>
+                                <button class="tactic-btn active" data-tactic="closingDown" data-value="standard">Standard</button>
+                                <button class="tactic-btn" data-tactic="closingDown" data-value="stand-off">StandOff</button>
+                                <button class="tactic-btn" data-tactic="closingDown" data-value="own-half">Own Half</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Tackling</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="tackling" data-value="hard">Hard</button>
+                                <button class="tactic-btn active" data-tactic="tackling" data-value="normal">Normal</button>
+                                <button class="tactic-btn" data-tactic="tackling" data-value="easy">Easy</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Passing</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="passing" data-value="direct">Direct</button>
+                                <button class="tactic-btn active" data-tactic="passing" data-value="mixed">Mixed</button>
+                                <button class="tactic-btn" data-tactic="passing" data-value="short">Short</button>
+                            </div>
                         </div>
                     </div>
 
