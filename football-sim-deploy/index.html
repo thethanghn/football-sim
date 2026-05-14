@@ -1,0 +1,1597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football Match Simulator</title>
+    <style>
+        /* ═══════════════════════════════════════════════════════
+           DESIGN SYSTEM — Football Simulator
+           Stadium Dark (Refined)
+        ════════════════════════════════════════════════════════ */
+
+        /* ── TOKENS ─────────────────────────────────────────── */
+        :root {
+            --c-bg-0:     #060e08;
+            --c-bg-1:     #0b1c10;
+            --c-bg-2:     #0d2417;
+            --c-bg-3:     #122b19;
+            --c-bg-4:     #1a4228;
+
+            --c-gold:     #FFD700;
+            --c-gold-dim: rgba(255,215,0,0.12);
+            --c-gold-glow:rgba(255,215,0,0.28);
+
+            --c-green:    #4ADE80;
+            --c-green-neon: #00FF00;
+            --c-green-dim:  rgba(74,222,128,0.12);
+
+            --c-red:      #FF4444;
+            --c-red-dim:  rgba(255,68,68,0.12);
+
+            --c-blue:     #4499FF;
+            --c-teal:     #00CC88;
+            --c-orange:   #FF5533;
+
+            --c-text-0:   #FFFFFF;
+            --c-text-1:   #EEF3EE;
+            --c-text-2:   #90ADA0;
+            --c-text-3:   #4D6858;
+
+            --c-border-gold:   rgba(255,215,0,0.45);
+            --c-border-strong: #FFD700;
+            --c-border-subtle: rgba(255,255,255,0.07);
+
+            --r-sm: 4px;
+            --r-md: 6px;
+            --r-lg: 10px;
+
+            --shadow-sm: 0 1px 4px rgba(0,0,0,0.55);
+            --shadow-md: 0 3px 12px rgba(0,0,0,0.55);
+            --shadow-lg: 0 6px 24px rgba(0,0,0,0.65);
+
+            --t-fast: 0.14s ease;
+            --t-base: 0.22s ease;
+        }
+
+        /* ── RESET ───────────────────────────────────────────── */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ── BODY / SHELL ────────────────────────────────────── */
+        body {
+            font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
+            background: radial-gradient(ellipse 120% 80% at 50% 0%, #0e2a16 0%, #060e08 65%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: var(--c-bg-1);
+            border-radius: 12px;
+            border: 1px solid var(--c-border-gold);
+            box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255,215,0,0.06);
+            max-width: 1400px;
+            width: 95%;
+            padding: 28px;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--c-gold);
+            margin-bottom: 28px;
+            font-size: 26px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            text-shadow: 0 0 24px var(--c-gold-glow);
+        }
+
+        /* ── SCREEN SYSTEM ───────────────────────────────────── */
+        .screen          { display: none !important; }
+        .screen.active   { display: block !important; }
+        #managementScreen.active { display: flex !important; }
+
+        /* ═══════════════════════════════════════════════════════
+           FORMATION SCREEN
+        ════════════════════════════════════════════════════════ */
+        #formationScreen h2 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: var(--c-text-2);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .formations {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .formation-btn {
+            padding: 18px 16px;
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            background: var(--c-bg-2);
+            color: var(--c-text-1);
+            cursor: pointer;
+            transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+            text-align: center;
+            font-weight: 700;
+            font-size: 17px;
+            letter-spacing: 1px;
+        }
+
+        .formation-btn:hover {
+            border-color: var(--c-gold);
+            background: var(--c-gold-dim);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 14px rgba(255,215,0,0.15);
+        }
+
+        .formation-btn.selected {
+            background: var(--c-gold-dim);
+            color: var(--c-gold);
+            border-color: var(--c-gold);
+            box-shadow: 0 0 0 1px var(--c-gold), 0 4px 14px rgba(255,215,0,0.2);
+        }
+
+        .formation-desc {
+            font-size: 11px;
+            color: var(--c-text-2);
+            margin-top: 6px;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+        }
+
+        .formation-btn.selected .formation-desc { color: var(--c-gold); opacity: 0.8; }
+
+        /* ═══════════════════════════════════════════════════════
+           MATCH SCREEN
+        ════════════════════════════════════════════════════════ */
+        .match-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--c-border-subtle);
+        }
+
+        .match-team {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+            flex: 1;
+        }
+
+        .match-team-right {
+            align-items: flex-end;
+            text-align: right;
+        }
+
+        .match-team-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--c-text-1);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 150px;
+        }
+
+        .match-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .match-center .score-display { flex: unset; }
+
+        .score-display {
+            font-size: 34px;
+            font-weight: 900;
+            color: var(--c-gold);
+            text-align: center;
+            flex: 1;
+            text-shadow: 0 0 16px var(--c-gold-glow);
+            font-family: 'Arial Black', Arial, sans-serif;
+        }
+
+        .timer {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--c-red);
+            padding: 8px 14px;
+            background: var(--c-red-dim);
+            border: 1px solid rgba(255,68,68,0.4);
+            border-radius: var(--r-sm);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ── Pitch ─── */
+        .match-content {
+            display: flex;
+            gap: 16px;
+            height: clamp(320px, 60vh, 580px);
+            margin-bottom: 18px;
+        }
+
+        .pitch-container {
+            flex: 1.5;
+            background: #1a7a1a;
+            border-radius: var(--r-md);
+            overflow: hidden;
+            border: 2px solid var(--c-border-gold);
+            box-shadow: var(--shadow-md);
+            position: relative;
+        }
+
+        #pitchSVG { width: 100%; height: 100%; display: block; }
+
+        /* ── Sidebar ─── */
+        .match-sidebar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow: hidden;
+        }
+
+        .formation-info {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 0;
+            padding: 12px;
+            background: var(--c-bg-2);
+            border-radius: var(--r-md);
+            border: 1px solid var(--c-border-gold);
+            order: -1;
+        }
+
+        .team-formation {
+            text-align: center;
+            color: var(--c-text-2);
+            font-size: 13px;
+        }
+
+        .team-formation strong { color: var(--c-text-1); }
+
+        /* ── Events log ─── */
+        .events-log {
+            background: var(--c-bg-2);
+            border-radius: var(--r-md);
+            padding: 12px;
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid var(--c-border-gold);
+        }
+
+        .events-log::-webkit-scrollbar { width: 4px; }
+        .events-log::-webkit-scrollbar-track { background: var(--c-bg-0); }
+        .events-log::-webkit-scrollbar-thumb { background: var(--c-border-gold); border-radius: 2px; }
+
+        .event {
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            border-radius: var(--r-sm);
+            font-size: 13px;
+            border-left: 3px solid transparent;
+            animation: slideIn 0.25s ease both;
+        }
+
+        .event.goal   { background: rgba(74,222,128,0.13); border-left-color: var(--c-green); color: #b0ffcc; font-weight: 700; }
+        .event.chance { background: rgba(255,215,0,0.11);  border-left-color: var(--c-gold);  color: #ffe082; }
+        .event.tackle { background: rgba(255,68,68,0.10);  border-left-color: var(--c-red);   color: #ffaaaa; }
+        .event.pass   { background: rgba(68,153,255,0.10); border-left-color: var(--c-blue);  color: #aaccff; }
+        .event.save   { background: rgba(180,100,255,0.10);border-left-color: #bb7fee;        color: #ddbbff; }
+        .event.corner { background: rgba(0,204,136,0.10);  border-left-color: var(--c-teal);  color: #99eedd; }
+        .event.injury { background: rgba(255,100,60,0.10); border-left-color: var(--c-orange);color: #ffbbaa; }
+        .event.card   { background: rgba(255,153,0,0.10);  border-left-color: #FF9900;        color: #ffcc88; }
+
+        .ev-name {
+            font-weight: 800;
+            color: #fff;
+            background: rgba(0,0,0,0.5);
+            border-radius: 3px;
+            padding: 0 4px;
+            letter-spacing: 0.3px;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        /* ── Stats ─── */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 16px 0;
+            font-size: 13px;
+        }
+
+        .stat {
+            background: var(--c-bg-2);
+            border: 1px solid var(--c-border-gold);
+            padding: 10px 8px;
+            border-radius: var(--r-md);
+            text-align: center;
+        }
+
+        .stat-label { color: var(--c-text-2); font-size: 11px; margin-bottom: 3px; }
+        .stat-value { font-weight: 700; font-size: 17px; color: var(--c-gold); }
+
+        /* ═══════════════════════════════════════════════════════
+           BUTTONS
+        ════════════════════════════════════════════════════════ */
+        .buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        button {
+            padding: 11px 28px;
+            font-size: 14px;
+            border: none;
+            border-radius: var(--r-md);
+            cursor: pointer;
+            font-weight: 700;
+            transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1e4a28 0%, #0d2417 100%);
+            color: var(--c-gold);
+            border: 2px solid var(--c-border-gold);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #26602e 0%, #122b19 100%);
+            border-color: var(--c-gold);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255,215,0,0.2);
+        }
+
+        .btn-primary:disabled {
+            background: var(--c-bg-2);
+            color: var(--c-text-3);
+            border-color: var(--c-border-subtle);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-secondary {
+            background: var(--c-bg-3);
+            color: var(--c-text-1);
+            border: 1px solid var(--c-border-gold);
+        }
+
+        .btn-secondary:hover {
+            background: var(--c-bg-4);
+            border-color: var(--c-gold);
+        }
+
+        /* ═══════════════════════════════════════════════════════
+           MANAGEMENT SCREEN
+        ════════════════════════════════════════════════════════ */
+        .squad-section {
+            display: flex;
+            flex-direction: column;
+            background: var(--c-bg-3);
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 0;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .squad-title {
+            font-weight: 700;
+            font-size: 13px;
+            padding: 10px 12px;
+            color: var(--c-gold);
+            border-bottom: 2px solid var(--c-border-gold);
+            background: var(--c-bg-0);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            flex-shrink: 0;
+        }
+
+        .squad-list {
+            overflow-y: auto;
+            flex: 1;
+            background: var(--c-bg-3);
+            padding: 0;
+        }
+
+        .squad-list::-webkit-scrollbar { width: 3px; }
+        .squad-list::-webkit-scrollbar-track { background: var(--c-bg-0); }
+        .squad-list::-webkit-scrollbar-thumb { background: var(--c-border-gold); border-radius: 2px; }
+
+        .player-item {
+            padding: 7px 8px;
+            border-bottom: 1px solid rgba(0,0,0,0.35);
+            cursor: pointer;
+            background: var(--c-bg-3);
+            transition: background var(--t-fast), border-left-color var(--t-fast);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            min-height: 52px;
+            color: var(--c-text-1);
+            border-left: 3px solid transparent;
+            flex-shrink: 0;
+        }
+
+        .player-item:hover {
+            background: var(--c-bg-4);
+            border-left-color: var(--c-gold);
+        }
+
+        .player-item.onfield {
+            border-left-color: var(--c-green);
+            background: rgba(74,222,128,0.06);
+        }
+
+        .player-item.selected {
+            background: rgba(255,215,0,0.14);
+            border-left-color: var(--c-gold);
+            box-shadow: inset 3px 0 0 var(--c-gold);
+        }
+
+        .player-info { flex: 1; }
+
+        .player-name {
+            font-weight: 700;
+            color: var(--c-gold);
+            font-size: 12px;
+        }
+
+        .player-item.selected .player-name { color: var(--c-gold); }
+
+        .player-position {
+            font-size: 10px;
+            color: var(--c-text-2);
+            margin-top: 1px;
+        }
+
+        .player-item.onfield .player-position { color: var(--c-green); }
+        .player-item.selected .player-position { color: var(--c-text-2); }
+
+        .player-number {
+            background: var(--c-red);
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: var(--r-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            border: 1px solid var(--c-border-gold);
+            flex-shrink: 0;
+        }
+
+        .player-item.selected .player-number {
+            background: var(--c-gold);
+            color: #000;
+            border-color: transparent;
+        }
+
+        .category-header {
+            padding: 3px 10px;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            background: var(--c-bg-0);
+            border-left: 3px solid;
+            flex-shrink: 0;
+            opacity: 0.9;
+        }
+
+        /* ── Instruction Panel ─── */
+        .instruction-panel {
+            background: var(--c-bg-2);
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 12px;
+            flex-shrink: 0;
+        }
+
+        .instruction-title {
+            color: var(--c-gold);
+            font-weight: 700;
+            font-size: 11px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .instruction-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .instruction-btn {
+            flex: 1;
+            padding: 10px 6px;
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            transition: all var(--t-fast);
+        }
+
+        .instruction-btn.defensive         { background: #0055cc; color: #fff; }
+        .instruction-btn.defensive.active  { background: var(--c-blue); color: #fff; box-shadow: 0 0 10px rgba(68,153,255,0.5); }
+        .instruction-btn.neutral           { background: #007a44; color: #fff; }
+        .instruction-btn.neutral.active    { background: var(--c-teal); color: #fff; box-shadow: 0 0 10px rgba(0,204,136,0.5); }
+        .instruction-btn.offensive         { background: #cc2200; color: #fff; }
+        .instruction-btn.offensive.active  { background: var(--c-orange); color: #fff; box-shadow: 0 0 10px rgba(255,85,51,0.5); }
+
+        .instruction-btn:hover:not(.active) {
+            filter: brightness(1.2);
+            transform: scale(1.03);
+        }
+
+        /* ── Sub / Management Info ─── */
+        .management-info {
+            background: var(--c-bg-2);
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: var(--c-gold);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .swap-button {
+            padding: 11px 16px;
+            background: var(--c-green-dim);
+            color: var(--c-green);
+            border: 2px solid var(--c-green);
+            border-radius: var(--r-md);
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 13px;
+            margin-top: 12px;
+            width: 100%;
+            transition: all var(--t-fast);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .swap-button:hover:not(:disabled) {
+            background: rgba(74,222,128,0.22);
+            box-shadow: 0 0 10px rgba(74,222,128,0.3);
+        }
+
+        .swap-button:disabled {
+            background: var(--c-bg-2);
+            color: var(--c-text-3);
+            cursor: not-allowed;
+            border-color: var(--c-border-subtle);
+        }
+
+        .management-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            grid-column: 1 / -1;
+        }
+
+        /* ── Player Detail Panel ─── */
+        #mobilePlayerDetail { display: none; }
+
+        .player-detail-panel {
+            background: var(--c-bg-2);
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 14px;
+            display: flex !important;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .player-detail-header {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            align-items: flex-start;
+            flex-shrink: 0;
+        }
+
+        .player-detail-header svg,
+        .player-detail-avatar svg {
+            border: 2px solid var(--c-border-gold);
+            border-radius: var(--r-sm);
+            width: 80px;
+            height: 80px;
+            flex-shrink: 0;
+        }
+
+        .player-detail-avatar { flex-shrink: 0; }
+        .player-detail-info   { flex: 1; }
+
+        .player-detail-name {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--c-gold);
+            margin-bottom: 4px;
+            line-height: 1.2;
+        }
+
+        .player-detail-position {
+            font-size: 13px;
+            color: var(--c-green);
+            margin-bottom: 8px;
+        }
+
+        .player-detail-number {
+            font-size: 28px;
+            font-weight: 900;
+            color: var(--c-red);
+            line-height: 1;
+            font-family: 'Arial Black', Arial, sans-serif;
+        }
+
+        .radar-chart-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        .radar-chart-container svg { max-width: 180px; height: auto; }
+
+        .attribute-bars {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .attribute-bar {
+            background: var(--c-bg-0);
+            padding: 7px;
+            border: 1px solid var(--c-border-gold);
+            border-radius: var(--r-sm);
+        }
+
+        .attribute-label {
+            font-size: 9px;
+            color: var(--c-gold);
+            font-weight: 700;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .attribute-value {
+            font-size: 12px;
+            color: var(--c-green);
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .attribute-bar-bg {
+            background: var(--c-bg-2);
+            height: 4px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .attribute-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.35s ease;
+        }
+
+        .close-detail-btn {
+            background: var(--c-red-dim);
+            color: var(--c-red);
+            border: 1px solid var(--c-red);
+            border-radius: var(--r-sm);
+            padding: 9px 14px;
+            cursor: pointer;
+            font-weight: 700;
+            width: 100%;
+            text-transform: uppercase;
+            font-size: 11px;
+            flex-shrink: 0;
+            transition: background var(--t-fast);
+        }
+
+        .close-detail-btn:hover {
+            background: rgba(255,68,68,0.22);
+        }
+
+        /* ═══════════════════════════════════════════════════════
+           RESULT SCREEN
+        ════════════════════════════════════════════════════════ */
+        .result-teams {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 18px;
+        }
+
+        .result-team {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .result-team-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--c-text-1);
+            text-align: center;
+            max-width: 110px;
+        }
+
+        .result-score-display {
+            font-size: 52px;
+            font-weight: 900;
+            color: var(--c-gold);
+            line-height: 1;
+            padding: 0 10px;
+            text-shadow: 0 0 20px var(--c-gold-glow);
+            font-family: 'Arial Black', Arial, sans-serif;
+        }
+
+        .result-message {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            margin: 16px 0;
+            padding: 16px 20px;
+            border-radius: var(--r-md);
+            border-left: 5px solid;
+        }
+
+        .result-message.win  { background: var(--c-green-dim); color: var(--c-green); border-color: var(--c-green); }
+        .result-message.draw { background: var(--c-gold-dim);  color: var(--c-gold);  border-color: var(--c-gold); }
+        .result-message.loss { background: var(--c-red-dim);   color: var(--c-red);   border-color: var(--c-red); }
+
+        #resultScreen h3 {
+            color: var(--c-gold);
+            margin-bottom: 10px;
+            font-size: 14px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .result-summary-item {
+            padding: 10px 12px;
+            margin-bottom: 7px;
+            background: var(--c-bg-2);
+            border-radius: var(--r-sm);
+            font-size: 13px;
+            color: var(--c-text-1);
+            border-left: 3px solid;
+        }
+
+        /* ═══════════════════════════════════════════════════════
+           CELEBRATION (unchanged from original — keep as-is)
+        ════════════════════════════════════════════════════════ */
+        .cel-wrap {
+            position: absolute; inset: 0; z-index: 10; overflow: hidden;
+            animation: celIn 0.45s cubic-bezier(0.34,1.56,0.64,1) both;
+        }
+        @keyframes celIn {
+            from { opacity: 0; transform: scale(0.88); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+        .cel-stadium-bg { position: absolute; inset: 0; width: 100%; height: 100%; }
+        .cel-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+        .cel-goal-banner {
+            position: absolute; top: 5%; left: 50%;
+            transform: translateX(-50%); text-align: center; pointer-events: none;
+        }
+        .cel-goal-word {
+            display: block;
+            font-family: 'Arial Black', Arial, sans-serif;
+            font-size: clamp(46px, 9vw, 82px);
+            font-weight: 900; letter-spacing: 10px; color: #FFD700;
+            text-shadow: 0 0 30px #FFD700, 0 0 60px #FF8800,
+                         4px 4px 0 #000, -4px -4px 0 #000,
+                         4px -4px 0 #000, -4px  4px 0 #000;
+            animation: goalBounce 0.55s cubic-bezier(0.17,0.67,0.83,0.67) both,
+                       goalGlow   0.9s 0.55s ease-in-out infinite alternate;
+            white-space: nowrap;
+        }
+        @keyframes goalBounce {
+            0%   { transform: scale(0.2) rotate(-12deg); opacity: 0; }
+            65%  { transform: scale(1.22) rotate(4deg);  opacity: 1; }
+            100% { transform: scale(1)   rotate(0deg); }
+        }
+        @keyframes goalGlow {
+            from { text-shadow: 0 0 20px #FFD700, 0 0 40px #FF8800, 4px 4px 0 #000; }
+            to   { text-shadow: 0 0 55px #FFD700, 0 0 110px #FF4400, 0 0 140px #FF0000, 4px 4px 0 #000; }
+        }
+        .cel-score-row {
+            display: flex; align-items: center; justify-content: center;
+            gap: 14px; margin-top: 10px;
+        }
+        .cel-score-club {
+            font-size: clamp(10px, 2vw, 15px); font-weight: bold; color: #fff;
+            text-shadow: 1px 1px 3px #000; max-width: 130px; text-align: center;
+        }
+        .cel-score-num {
+            font-family: 'Arial Black', Arial; font-weight: 900;
+            font-size: clamp(26px, 5vw, 46px); color: #fff; letter-spacing: 5px;
+            text-shadow: 2px 2px 0 #000, 0 0 22px rgba(255,255,255,0.45);
+        }
+        .cel-stage {
+            position: absolute; bottom: 7%; left: 50%; transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center;
+            width: 94%; max-width: 740px;
+        }
+        .cel-player-row {
+            display: flex; align-items: flex-end; justify-content: center;
+            gap: clamp(4px, 1.8vw, 16px);
+        }
+        .cel-mates-group { display: flex; align-items: flex-end; gap: clamp(3px, 1.4vw, 12px); }
+        .cel-mate {
+            animation: mateDance 0.72s ease-in-out infinite;
+            filter: drop-shadow(0 8px 6px rgba(0,0,0,0.75));
+        }
+        .cel-mate:nth-child(1) { animation-delay: 0.00s; }
+        .cel-mate:nth-child(2) { animation-delay: 0.15s; }
+        @keyframes mateDance {
+            0%,100% { transform: translateY(0)    rotate(-5deg) scale(1); }
+            50%     { transform: translateY(-22px) rotate( 5deg) scale(1.04); }
+        }
+        .cel-scorer-fig {
+            display: flex; flex-direction: column; align-items: center;
+            animation: scorerJump 0.68s ease-in-out infinite;
+            filter: drop-shadow(0 12px 8px rgba(0,0,0,0.85));
+        }
+        @keyframes scorerJump {
+            0%,100% { transform: translateY(0)    scale(1)    rotate(0deg); }
+            35%     { transform: translateY(-44px) scale(1.07) rotate(-7deg); }
+            65%     { transform: translateY(-30px) scale(1.03) rotate(5deg); }
+        }
+        .cel-scorer-name {
+            margin-top: 4px; font-family: 'Arial Black', Arial; font-weight: 900;
+            font-size: clamp(12px, 2.2vw, 19px); color: #FFD700; letter-spacing: 2px;
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+            white-space: nowrap; text-align: center;
+        }
+        .cel-scorer-pos {
+            font-size: clamp(9px, 1.5vw, 12px); color: #ccc;
+            text-shadow: 1px 1px 2px #000; letter-spacing: 1px; margin-top: 2px;
+        }
+        .cel-pitch-shadow {
+            width: 100%; height: 16px; margin-top: -6px;
+            background: radial-gradient(ellipse at center, rgba(0,0,0,0.4) 0%, transparent 72%);
+        }
+
+        /* ═══════════════════════════════════════════════════════
+           MOBILE
+        ════════════════════════════════════════════════════════ */
+        @media (max-width: 640px) {
+            body { padding: 0; align-items: flex-start; min-height: 100dvh; }
+
+            .container {
+                width: 100%; max-width: 100%; border-radius: 0;
+                padding: 8px; min-height: 100dvh; box-shadow: none; border-left: none; border-right: none;
+            }
+
+            h1 { font-size: 14px; margin-bottom: 8px; letter-spacing: 2px; }
+
+            /* ── Management ── */
+            #managementScreen {
+                padding: 8px !important;
+                height: 100dvh !important;
+                overflow-y: auto !important;
+            }
+            #managementScreen > div:first-child { margin-bottom: 8px !important; gap: 8px !important; }
+            #managementTitle { font-size: 13px !important; letter-spacing: 1px !important; }
+
+            #managementScreen > div:nth-child(3) {
+                grid-template-columns: 1fr 1fr !important;
+                grid-template-rows: auto auto !important;
+                overflow: visible !important;
+                min-height: 0; gap: 6px !important;
+            }
+            #managementScreen > div:nth-child(3) > .squad-section:first-child { grid-column: 1; grid-row: 1; max-height: 44vh; }
+            #managementScreen > div:nth-child(3) > .squad-section:last-child  { grid-column: 2; grid-row: 1; max-height: 44vh; }
+            #managementScreen > div:nth-child(3) > div:not(.squad-section)    { grid-column: 1 / -1; grid-row: 2; overflow: visible; }
+
+            #playerDetailPanel { display: none !important; }
+            #instructionPanel  { display: none !important; }
+
+            #mobilePlayerDetail {
+                display: block !important;
+                max-height: 45vh; overflow-y: auto;
+                margin-bottom: 6px; flex-shrink: 0;
+                background: var(--c-bg-2);
+                border: 2px solid var(--c-border-gold);
+                border-radius: var(--r-md);
+                padding: 12px;
+            }
+
+            .player-item { min-height: 40px; padding: 4px 6px; }
+            .player-item svg { width: 30px !important; height: 30px !important; }
+            .player-name  { font-size: 10px; }
+            .player-position { font-size: 9px; }
+            .player-number { width: 26px; height: 26px; font-size: 10px; }
+            .squad-title   { font-size: 11px; padding: 7px 10px; letter-spacing: 1px; }
+            .category-header { font-size: 9px; }
+
+            #mgmtStartBtn { padding: 12px !important; font-size: 13px !important; }
+            #confirmSubBtn, #closeManageBtn { padding: 10px 8px; font-size: 12px; }
+            .management-info { font-size: 11px; padding: 8px; }
+
+            /* ── Match ── */
+            .match-header { margin-bottom: 8px; padding-bottom: 8px; }
+            .match-team-name { font-size: 10px; max-width: 80px; }
+            .score-display { font-size: 22px; }
+            .timer { font-size: 14px; padding: 5px 8px; }
+            .match-content { flex-direction: column; height: auto !important; gap: 6px; margin-bottom: 8px; }
+            .pitch-container { flex: unset; height: 52vw; min-height: 200px; max-height: 300px; }
+            .match-sidebar { flex: unset; overflow-y: visible; }
+            .events-log { height: 240px; max-height: 240px; padding: 8px; font-size: 12px; }
+            .event { padding: 6px 8px; font-size: 12px; margin-bottom: 4px; }
+            .formation-info { padding: 8px; font-size: 11px; gap: 8px; }
+            .stats { grid-template-columns: repeat(2, 1fr) !important; gap: 6px; margin: 6px 0; }
+            .stat { padding: 6px; }
+            .stat-label { font-size: 10px; }
+            .stat-value { font-size: 14px; }
+            .buttons { gap: 6px; flex-wrap: wrap; }
+            button { padding: 10px 14px; font-size: 13px; min-height: 44px; }
+
+            /* ── Result ── */
+            .result-score-display { font-size: 36px; }
+            .result-teams { gap: 10px; }
+            .result-team-name { font-size: 12px; max-width: 80px; }
+            #finalStats { grid-template-columns: repeat(2, 1fr) !important; gap: 6px; }
+
+            /* ── Attribute bars: 2 cols ── */
+            .attribute-bars { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚽ Football Match Simulator</h1>
+
+        <!-- Formation Selection Screen -->
+        <div class="screen" id="formationScreen">
+            <h2 style="text-align: center; margin-bottom: 20px; color: #666;">Choose Your Formation</h2>
+            <div class="formations">
+                <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)">
+                    4-4-2
+                    <div class="formation-desc">Balanced</div>
+                </button>
+                <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)">
+                    4-3-3
+                    <div class="formation-desc">Offensive</div>
+                </button>
+                <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)">
+                    5-3-2
+                    <div class="formation-desc">Defensive</div>
+                </button>
+                <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)">
+                    3-4-3
+                    <div class="formation-desc">Balanced</div>
+                </button>
+            </div>
+            <div class="buttons">
+                <button class="btn-primary" id="startBtn" disabled onclick="window.game.startMatch();">Start Match</button>
+            </div>
+        </div>
+
+        <!-- Match Screen -->
+        <div class="screen" id="matchScreen">
+            <div class="match-header">
+                <div class="match-team" id="playerTeamDisplay"></div>
+                <div class="match-center">
+                    <div class="timer" id="timer">1:00</div>
+                    <div class="score-display"><span id="playerScore">0</span> - <span id="cpuScore">0</span></div>
+                </div>
+                <div class="match-team match-team-right" id="cpuTeamDisplay"></div>
+            </div>
+
+            <div class="match-content">
+                <!-- Pitch Visualization -->
+                <div class="pitch-container">
+                    <svg id="pitchSVG"></svg>
+                    <div id="celebrationScreen" style="display:none; position:absolute; inset:0;">
+                        <div class="cel-wrap">
+                            <!-- Stadium background SVG -->
+                            <svg class="cel-stadium-bg" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                                <defs>
+                                    <linearGradient id="cSky" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%"   stop-color="#010210"/>
+                                        <stop offset="55%"  stop-color="#0b1235"/>
+                                        <stop offset="100%" stop-color="#111e55"/>
+                                    </linearGradient>
+                                    <linearGradient id="cPitch" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%"   stop-color="#1b640f"/>
+                                        <stop offset="100%" stop-color="#2d9618"/>
+                                    </linearGradient>
+                                    <radialGradient id="cGl1" cx="0.09" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
+                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
+                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                                    </radialGradient>
+                                    <radialGradient id="cGl2" cx="0.91" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
+                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
+                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                                    </radialGradient>
+                                    <radialGradient id="cGlPitch" cx="0.5" cy="0.3" r="0.6" gradientUnits="objectBoundingBox">
+                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.08"/>
+                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                                    </radialGradient>
+                                </defs>
+                                <rect width="900" height="560" fill="url(#cSky)"/>
+                                <rect width="900" height="560" fill="url(#cGl1)"/>
+                                <rect width="900" height="560" fill="url(#cGl2)"/>
+                                <circle cx="82"  cy="18"  r="1.2" fill="white" opacity="0.75"/>
+                                <circle cx="155" cy="32"  r="0.8" fill="white" opacity="0.55"/>
+                                <circle cx="228" cy="15"  r="1.1" fill="white" opacity="0.8"/>
+                                <circle cx="312" cy="28"  r="0.7" fill="white" opacity="0.45"/>
+                                <circle cx="398" cy="11"  r="1.3" fill="white" opacity="0.65"/>
+                                <circle cx="488" cy="24"  r="0.9" fill="white" opacity="0.7"/>
+                                <circle cx="574" cy="9"   r="1.1" fill="white" opacity="0.55"/>
+                                <circle cx="658" cy="31"  r="0.8" fill="white" opacity="0.6"/>
+                                <circle cx="742" cy="17"  r="1.3" fill="white" opacity="0.8"/>
+                                <circle cx="823" cy="27"  r="0.9" fill="white" opacity="0.55"/>
+                                <circle cx="128" cy="52"  r="0.7" fill="white" opacity="0.4"/>
+                                <circle cx="272" cy="46"  r="0.9" fill="white" opacity="0.5"/>
+                                <circle cx="700" cy="40"  r="0.8" fill="white" opacity="0.45"/>
+                                <circle cx="860" cy="14"  r="1"   fill="white" opacity="0.6"/>
+                                <circle cx="44"  cy="42"  r="0.7" fill="white" opacity="0.4"/>
+                                <rect x="0"  y="36"  width="900" height="158" fill="#0e1132"/>
+                                <rect x="0"  y="36"  width="900" height="17"  fill="#15184e"/>
+                                <rect x="0"  y="53"  width="900" height="15"  fill="#121448"/>
+                                <rect x="0"  y="68"  width="900" height="15"  fill="#101242"/>
+                                <rect x="0"  y="83"  width="900" height="14"  fill="#0e103e"/>
+                                <rect x="0"  y="97"  width="900" height="14"  fill="#0c0e3a"/>
+                                <rect x="0"  y="111" width="900" height="13"  fill="#0b0c35"/>
+                                <rect x="0"  y="124" width="900" height="13"  fill="#090b31"/>
+                                <rect x="0"  y="137" width="900" height="14"  fill="#08092e"/>
+                                <rect x="0"  y="151" width="900" height="14"  fill="#07082b"/>
+                                <rect x="0"  y="165" width="900" height="17"  fill="#060728"/>
+                                <rect x="38"  y="42"  width="105" height="58" fill="#8B0000" opacity="0.55"/>
+                                <rect x="148" y="42"  width="78"  height="58" fill="#ffffff" opacity="0.17"/>
+                                <rect x="232" y="42"  width="115" height="58" fill="#003380" opacity="0.52"/>
+                                <rect x="352" y="42"  width="88"  height="58" fill="#CC0000" opacity="0.45"/>
+                                <rect x="446" y="42"  width="108" height="58" fill="#FFD700" opacity="0.22"/>
+                                <rect x="560" y="42"  width="78"  height="58" fill="#003380" opacity="0.48"/>
+                                <rect x="645" y="42"  width="115" height="58" fill="#8B0000" opacity="0.5"/>
+                                <rect x="766" y="42"  width="88"  height="58" fill="#ffffff" opacity="0.14"/>
+                                <path d="M0,185 Q9,178 18,185 Q27,178 36,185 Q45,178 54,185 Q63,178 72,185 Q81,178 90,185 Q99,178 108,185 Q117,178 126,185 Q135,178 144,185 Q153,178 162,185 Q171,178 180,185 Q189,178 198,185 Q207,178 216,185 Q225,178 234,185 Q243,178 252,185 Q261,178 270,185 Q279,178 288,185 Q297,178 306,185 Q315,178 324,185 Q333,178 342,185 Q351,178 360,185 Q369,178 378,185 Q387,178 396,185 Q405,178 414,185 Q423,178 432,185 Q441,178 450,185 Q459,178 468,185 Q477,178 486,185 Q495,178 504,185 Q513,178 522,185 Q531,178 540,185 Q549,178 558,185 Q567,178 576,185 Q585,178 594,185 Q603,178 612,185 Q621,178 630,185 Q639,178 648,185 Q657,178 666,185 Q675,178 684,185 Q693,178 702,185 Q711,178 720,185 Q729,178 738,185 Q747,178 756,185 Q765,178 774,185 Q783,178 792,185 Q801,178 810,185 Q819,178 828,185 Q837,178 846,185 Q855,178 864,185 Q873,178 882,185 Q891,178 900,185 L900,560 L0,560 Z" fill="#0c0c2e"/>
+                                <rect x="28" y="185" width="844" height="108" fill="#09092a"/>
+                                <rect x="24" y="185" width="852" height="14"  fill="#131540"/>
+                                <rect x="20" y="199" width="860" height="14"  fill="#10123a"/>
+                                <rect x="15" y="213" width="870" height="13"  fill="#0d0f34"/>
+                                <rect x="10" y="226" width="880" height="14"  fill="#0b0c2e"/>
+                                <rect x="5"  y="240" width="890" height="13"  fill="#090a29"/>
+                                <rect x="0"  y="253" width="900" height="14"  fill="#070822"/>
+                                <rect x="0"  y="267" width="900" height="16"  fill="#06061e"/>
+                                <rect x="28"  y="191" width="128" height="88" fill="#CC0000"  opacity="0.48"/>
+                                <rect x="162" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.14"/>
+                                <rect x="266" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
+                                <rect x="410" y="191" width="88"  height="88" fill="#FFD700"  opacity="0.2"/>
+                                <rect x="504" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
+                                <rect x="648" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.13"/>
+                                <rect x="752" y="191" width="118" height="88" fill="#CC0000"  opacity="0.46"/>
+                                <path d="M0,282 Q7,276 14,282 Q21,276 28,282 Q35,276 42,282 Q49,276 56,282 Q63,276 70,282 Q77,276 84,282 Q91,276 98,282 Q105,276 112,282 Q119,276 126,282 Q133,276 140,282 Q147,276 154,282 Q161,276 168,282 Q175,276 182,282 Q189,276 196,282 Q203,276 210,282 Q217,276 224,282 Q231,276 238,282 Q245,276 252,282 Q259,276 266,282 Q273,276 280,282 Q287,276 294,282 Q301,276 308,282 Q315,276 322,282 Q329,276 336,282 Q343,276 350,282 Q357,276 364,282 Q371,276 378,282 Q385,276 392,282 Q399,276 406,282 Q413,276 420,282 Q427,276 434,282 Q441,276 448,282 Q455,276 462,282 Q469,276 476,282 Q483,276 490,282 Q497,276 504,282 Q511,276 518,282 Q525,276 532,282 Q539,276 546,282 Q553,276 560,282 Q567,276 574,282 Q581,276 588,282 Q595,276 602,282 Q609,276 616,282 Q623,276 630,282 Q637,276 644,282 Q651,276 658,282 Q665,276 672,282 Q679,276 686,282 Q693,276 700,282 Q707,276 714,282 Q721,276 728,282 Q735,276 742,282 Q749,276 756,282 Q763,276 770,282 Q777,276 784,282 Q791,276 798,282 Q805,276 812,282 Q819,276 826,282 Q833,276 840,282 Q847,276 854,282 Q861,276 868,282 Q875,276 882,282 Q889,276 896,282 L900,282 L900,560 L0,560 Z" fill="#07071e"/>
+                                <rect x="0" y="292" width="900" height="24" fill="#060618"/>
+                                <rect x="4"   y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
+                                <rect x="98"  y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
+                                <rect x="192" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
+                                <rect x="286" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
+                                <rect x="380" y="295" width="90"  height="18" fill="#FFD700"   rx="2"/>
+                                <rect x="474" y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
+                                <rect x="568" y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
+                                <rect x="662" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
+                                <rect x="756" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
+                                <rect x="850" y="295" width="46"  height="18" fill="#FFD700"   rx="2"/>
+                                <rect x="0" y="316" width="900" height="244" fill="url(#cPitch)"/>
+                                <rect x="0"   y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="160" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="320" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="480" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="640" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="800" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                                <rect x="0" y="316" width="900" height="244" fill="url(#cGlPitch)"/>
+                                <rect x="306" y="234" width="288" height="83" fill="rgba(255,255,255,0.035)"/>
+                                <line x1="335" y1="237" x2="335" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="364" y1="237" x2="364" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="393" y1="237" x2="393" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="422" y1="237" x2="422" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="451" y1="237" x2="451" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="480" y1="237" x2="480" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="509" y1="237" x2="509" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="538" y1="237" x2="538" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="567" y1="237" x2="567" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                                <line x1="306" y1="257" x2="594" y2="257" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                                <line x1="306" y1="277" x2="594" y2="277" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                                <line x1="306" y1="297" x2="594" y2="297" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                                <rect x="305" y="232" width="7" height="86" fill="white"/>
+                                <rect x="588" y="232" width="7" height="86" fill="white"/>
+                                <rect x="305" y="229" width="290" height="7" fill="white"/>
+                                <rect x="313" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
+                                <rect x="588" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
+                                <ellipse cx="450" cy="286" rx="34" ry="32" fill="rgba(255,215,80,0.35)"/>
+                                <ellipse cx="450" cy="286" rx="20" ry="19" fill="rgba(255,240,150,0.65)"/>
+                                <circle  cx="450" cy="286" r="12" fill="white" opacity="0.94"/>
+                                <circle  cx="450" cy="286" r="12" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>
+                                <path    d="M445,279 L455,279 L459,286 L455,293 L445,293 L441,286 Z" fill="rgba(0,0,0,0.22)"/>
+                                <line x1="0" y1="316" x2="900" y2="316" stroke="white" stroke-width="2.5"/>
+                                <line x1="216" y1="316" x2="198" y2="435" stroke="white" stroke-width="1.8"/>
+                                <line x1="684" y1="316" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
+                                <line x1="198" y1="435" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
+                                <line x1="352" y1="316" x2="342" y2="368" stroke="white" stroke-width="1.4"/>
+                                <line x1="548" y1="316" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
+                                <line x1="342" y1="368" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
+                                <circle cx="450" cy="388" r="4.5" fill="white"/>
+                                <path d="M388,435 Q450,398 512,435" stroke="white" fill="none" stroke-width="1.8"/>
+                                <rect x="23" y="0"  width="10" height="240" fill="#252545"/>
+                                <rect x="19" y="0"  width="18" height="9"   fill="#35355a"/>
+                                <rect x="11" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
+                                <ellipse cx="28" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
+                                <ellipse cx="28" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
+                                <polygon points="12,20 45,20 520,318 0,318" fill="rgba(255,255,200,0.035)"/>
+                                <rect x="867" y="0"  width="10" height="240" fill="#252545"/>
+                                <rect x="863" y="0"  width="18" height="9"   fill="#35355a"/>
+                                <rect x="855" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
+                                <ellipse cx="872" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
+                                <ellipse cx="872" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
+                                <polygon points="855,20 888,20 900,318 380,318" fill="rgba(255,255,200,0.035)"/>
+                                <ellipse cx="450" cy="400" rx="420" ry="110" fill="rgba(255,255,200,0.05)"/>
+                            </svg>
+                            <!-- Canvas confetti -->
+                            <canvas id="celCanvas" class="cel-canvas"></canvas>
+                            <!-- GOAL! banner -->
+                            <div class="cel-goal-banner">
+                                <span class="cel-goal-word">⚽ GOAL! ⚽</span>
+                                <div class="cel-score-row">
+                                    <span class="cel-score-club" id="celPlayerName">—</span>
+                                    <span class="cel-score-num"  id="celScoreLine">0 - 0</span>
+                                    <span class="cel-score-club" id="celCpuName">—</span>
+                                </div>
+                            </div>
+                            <!-- Players on pitch -->
+                            <div class="cel-stage">
+                                <div class="cel-player-row">
+                                    <div id="celMatesLeft"  class="cel-mates-group"></div>
+                                    <div id="celScorerWrap"></div>
+                                    <div id="celMatesRight" class="cel-mates-group"></div>
+                                </div>
+                                <div class="cel-pitch-shadow"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Sidebar: Events, Formation, Stats -->
+                <div class="match-sidebar">
+                    <div class="formation-info">
+                        <div class="team-formation">
+                            <div id="playerCrestSm"></div>
+                            <strong id="playerClubName">You</strong><br>
+                            <span id="playerFormation">4-4-2</span>
+                        </div>
+                        <div class="team-formation">
+                            <div id="cpuCrestSm"></div>
+                            <strong id="cpuClubName">CPU</strong><br>
+                            <span id="cpuFormation">4-4-2</span>
+                        </div>
+                    </div>
+
+                    <div class="events-log" id="eventsLog">
+                        <div class="event pass">⚪ Match started! Possession: 50-50</div>
+                    </div>
+
+                    <div class="stats" id="stats">
+                        <div class="stat">
+                            <div class="stat-label">Shots on Target</div>
+                            <div class="stat-value"><span id="playerShots">0</span>-<span id="cpuShots">0</span></div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Possession</div>
+                            <div class="stat-value"><span id="playerPoss">50</span>%-<span id="cpuPoss">50</span>%</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Tackles</div>
+                            <div class="stat-value"><span id="playerTackles">0</span>-<span id="cpuTackles">0</span></div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">Passes</div>
+                            <div class="stat-value"><span id="playerPasses">0</span>-<span id="cpuPasses">0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="btn-secondary" id="pauseBtn">Pause</button>
+                <button class="btn-secondary" id="manageBtn" style="display: none;">Manage Team</button>
+                <button class="btn-primary" id="endBtn" style="display: none;">Match Ended</button>
+            </div>
+        </div>
+
+        <!-- [celebration moved inside .pitch-container] -->
+        <div style="display:none;">
+            <div class="cel-wrap">
+
+                <!-- Stadium background SVG -->
+                <svg class="cel-stadium-bg" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                    <defs>
+                        <linearGradient id="cSky" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stop-color="#010210"/>
+                            <stop offset="55%"  stop-color="#0b1235"/>
+                            <stop offset="100%" stop-color="#111e55"/>
+                        </linearGradient>
+                        <linearGradient id="cPitch" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stop-color="#1b640f"/>
+                            <stop offset="100%" stop-color="#2d9618"/>
+                        </linearGradient>
+                        <radialGradient id="cGl1" cx="0.09" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
+                            <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
+                            <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                        </radialGradient>
+                        <radialGradient id="cGl2" cx="0.91" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
+                            <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
+                            <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                        </radialGradient>
+                        <radialGradient id="cGlPitch" cx="0.5" cy="0.3" r="0.6" gradientUnits="objectBoundingBox">
+                            <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.08"/>
+                            <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
+                        </radialGradient>
+                    </defs>
+
+                    <!-- Sky -->
+                    <rect width="900" height="560" fill="url(#cSky)"/>
+                    <rect width="900" height="560" fill="url(#cGl1)"/>
+                    <rect width="900" height="560" fill="url(#cGl2)"/>
+
+                    <!-- Stars -->
+                    <circle cx="82"  cy="18"  r="1.2" fill="white" opacity="0.75"/>
+                    <circle cx="155" cy="32"  r="0.8" fill="white" opacity="0.55"/>
+                    <circle cx="228" cy="15"  r="1.1" fill="white" opacity="0.8"/>
+                    <circle cx="312" cy="28"  r="0.7" fill="white" opacity="0.45"/>
+                    <circle cx="398" cy="11"  r="1.3" fill="white" opacity="0.65"/>
+                    <circle cx="488" cy="24"  r="0.9" fill="white" opacity="0.7"/>
+                    <circle cx="574" cy="9"   r="1.1" fill="white" opacity="0.55"/>
+                    <circle cx="658" cy="31"  r="0.8" fill="white" opacity="0.6"/>
+                    <circle cx="742" cy="17"  r="1.3" fill="white" opacity="0.8"/>
+                    <circle cx="823" cy="27"  r="0.9" fill="white" opacity="0.55"/>
+                    <circle cx="128" cy="52"  r="0.7" fill="white" opacity="0.4"/>
+                    <circle cx="272" cy="46"  r="0.9" fill="white" opacity="0.5"/>
+                    <circle cx="700" cy="40"  r="0.8" fill="white" opacity="0.45"/>
+                    <circle cx="860" cy="14"  r="1"   fill="white" opacity="0.6"/>
+                    <circle cx="44"  cy="42"  r="0.7" fill="white" opacity="0.4"/>
+
+                    <!-- ══ UPPER STANDS ══ -->
+                    <rect x="0"  y="36"  width="900" height="158" fill="#0e1132"/>
+                    <rect x="0"  y="36"  width="900" height="17"  fill="#15184e"/>
+                    <rect x="0"  y="53"  width="900" height="15"  fill="#121448"/>
+                    <rect x="0"  y="68"  width="900" height="15"  fill="#101242"/>
+                    <rect x="0"  y="83"  width="900" height="14"  fill="#0e103e"/>
+                    <rect x="0"  y="97"  width="900" height="14"  fill="#0c0e3a"/>
+                    <rect x="0"  y="111" width="900" height="13"  fill="#0b0c35"/>
+                    <rect x="0"  y="124" width="900" height="13"  fill="#090b31"/>
+                    <rect x="0"  y="137" width="900" height="14"  fill="#08092e"/>
+                    <rect x="0"  y="151" width="900" height="14"  fill="#07082b"/>
+                    <rect x="0"  y="165" width="900" height="17"  fill="#060728"/>
+
+                    <!-- Crowd color blocks upper -->
+                    <rect x="38"  y="42"  width="105" height="58" fill="#8B0000" opacity="0.55"/>
+                    <rect x="148" y="42"  width="78"  height="58" fill="#ffffff" opacity="0.17"/>
+                    <rect x="232" y="42"  width="115" height="58" fill="#003380" opacity="0.52"/>
+                    <rect x="352" y="42"  width="88"  height="58" fill="#CC0000" opacity="0.45"/>
+                    <rect x="446" y="42"  width="108" height="58" fill="#FFD700" opacity="0.22"/>
+                    <rect x="560" y="42"  width="78"  height="58" fill="#003380" opacity="0.48"/>
+                    <rect x="645" y="42"  width="115" height="58" fill="#8B0000" opacity="0.5"/>
+                    <rect x="766" y="42"  width="88"  height="58" fill="#ffffff" opacity="0.14"/>
+
+                    <!-- Upper crowd silhouette -->
+                    <path d="M0,185 Q9,178 18,185 Q27,178 36,185 Q45,178 54,185 Q63,178 72,185 Q81,178 90,185 Q99,178 108,185 Q117,178 126,185 Q135,178 144,185 Q153,178 162,185 Q171,178 180,185 Q189,178 198,185 Q207,178 216,185 Q225,178 234,185 Q243,178 252,185 Q261,178 270,185 Q279,178 288,185 Q297,178 306,185 Q315,178 324,185 Q333,178 342,185 Q351,178 360,185 Q369,178 378,185 Q387,178 396,185 Q405,178 414,185 Q423,178 432,185 Q441,178 450,185 Q459,178 468,185 Q477,178 486,185 Q495,178 504,185 Q513,178 522,185 Q531,178 540,185 Q549,178 558,185 Q567,178 576,185 Q585,178 594,185 Q603,178 612,185 Q621,178 630,185 Q639,178 648,185 Q657,178 666,185 Q675,178 684,185 Q693,178 702,185 Q711,178 720,185 Q729,178 738,185 Q747,178 756,185 Q765,178 774,185 Q783,178 792,185 Q801,178 810,185 Q819,178 828,185 Q837,178 846,185 Q855,178 864,185 Q873,178 882,185 Q891,178 900,185 L900,560 L0,560 Z" fill="#0c0c2e"/>
+
+                    <!-- ══ LOWER STANDS ══ -->
+                    <rect x="28" y="185" width="844" height="108" fill="#09092a"/>
+                    <rect x="24" y="185" width="852" height="14"  fill="#131540"/>
+                    <rect x="20" y="199" width="860" height="14"  fill="#10123a"/>
+                    <rect x="15" y="213" width="870" height="13"  fill="#0d0f34"/>
+                    <rect x="10" y="226" width="880" height="14"  fill="#0b0c2e"/>
+                    <rect x="5"  y="240" width="890" height="13"  fill="#090a29"/>
+                    <rect x="0"  y="253" width="900" height="14"  fill="#070822"/>
+                    <rect x="0"  y="267" width="900" height="16"  fill="#06061e"/>
+
+                    <!-- Crowd colors lower -->
+                    <rect x="28"  y="191" width="128" height="88" fill="#CC0000"  opacity="0.48"/>
+                    <rect x="162" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.14"/>
+                    <rect x="266" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
+                    <rect x="410" y="191" width="88"  height="88" fill="#FFD700"  opacity="0.2"/>
+                    <rect x="504" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
+                    <rect x="648" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.13"/>
+                    <rect x="752" y="191" width="118" height="88" fill="#CC0000"  opacity="0.46"/>
+
+                    <!-- Lower crowd silhouette -->
+                    <path d="M0,282 Q7,276 14,282 Q21,276 28,282 Q35,276 42,282 Q49,276 56,282 Q63,276 70,282 Q77,276 84,282 Q91,276 98,282 Q105,276 112,282 Q119,276 126,282 Q133,276 140,282 Q147,276 154,282 Q161,276 168,282 Q175,276 182,282 Q189,276 196,282 Q203,276 210,282 Q217,276 224,282 Q231,276 238,282 Q245,276 252,282 Q259,276 266,282 Q273,276 280,282 Q287,276 294,282 Q301,276 308,282 Q315,276 322,282 Q329,276 336,282 Q343,276 350,282 Q357,276 364,282 Q371,276 378,282 Q385,276 392,282 Q399,276 406,282 Q413,276 420,282 Q427,276 434,282 Q441,276 448,282 Q455,276 462,282 Q469,276 476,282 Q483,276 490,282 Q497,276 504,282 Q511,276 518,282 Q525,276 532,282 Q539,276 546,282 Q553,276 560,282 Q567,276 574,282 Q581,276 588,282 Q595,276 602,282 Q609,276 616,282 Q623,276 630,282 Q637,276 644,282 Q651,276 658,282 Q665,276 672,282 Q679,276 686,282 Q693,276 700,282 Q707,276 714,282 Q721,276 728,282 Q735,276 742,282 Q749,276 756,282 Q763,276 770,282 Q777,276 784,282 Q791,276 798,282 Q805,276 812,282 Q819,276 826,282 Q833,276 840,282 Q847,276 854,282 Q861,276 868,282 Q875,276 882,282 Q889,276 896,282 L900,282 L900,560 L0,560 Z" fill="#07071e"/>
+
+                    <!-- ══ ADVERTISING BOARDS ══ -->
+                    <rect x="0" y="292" width="900" height="24" fill="#060618"/>
+                    <rect x="4"   y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
+                    <rect x="98"  y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
+                    <rect x="192" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
+                    <rect x="286" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
+                    <rect x="380" y="295" width="90"  height="18" fill="#FFD700"   rx="2"/>
+                    <rect x="474" y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
+                    <rect x="568" y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
+                    <rect x="662" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
+                    <rect x="756" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
+                    <rect x="850" y="295" width="46"  height="18" fill="#FFD700"   rx="2"/>
+
+                    <!-- ══ PITCH ══ -->
+                    <rect x="0" y="316" width="900" height="244" fill="url(#cPitch)"/>
+                    <!-- Mowing stripes -->
+                    <rect x="0"   y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <rect x="160" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <rect x="320" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <rect x="480" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <rect x="640" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <rect x="800" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
+                    <!-- Pitch ambient light -->
+                    <rect x="0" y="316" width="900" height="244" fill="url(#cGlPitch)"/>
+
+                    <!-- ══ GOAL ══ -->
+                    <!-- Net area fill -->
+                    <rect x="306" y="234" width="288" height="83" fill="rgba(255,255,255,0.035)"/>
+                    <!-- Net verticals -->
+                    <line x1="335" y1="237" x2="335" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="364" y1="237" x2="364" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="393" y1="237" x2="393" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="422" y1="237" x2="422" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="451" y1="237" x2="451" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="480" y1="237" x2="480" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="509" y1="237" x2="509" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="538" y1="237" x2="538" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <line x1="567" y1="237" x2="567" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
+                    <!-- Net horizontals -->
+                    <line x1="306" y1="257" x2="594" y2="257" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                    <line x1="306" y1="277" x2="594" y2="277" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                    <line x1="306" y1="297" x2="594" y2="297" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
+                    <!-- Posts -->
+                    <rect x="305" y="232" width="7" height="86" fill="white"/>
+                    <rect x="588" y="232" width="7" height="86" fill="white"/>
+                    <!-- Crossbar -->
+                    <rect x="305" y="229" width="290" height="7" fill="white"/>
+                    <!-- Post shadow -->
+                    <rect x="313" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
+                    <rect x="588" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
+
+                    <!-- ⚽ Ball glow in net -->
+                    <ellipse cx="450" cy="286" rx="34" ry="32" fill="rgba(255,215,80,0.35)"/>
+                    <ellipse cx="450" cy="286" rx="20" ry="19" fill="rgba(255,240,150,0.65)"/>
+                    <circle  cx="450" cy="286" r="12" fill="white" opacity="0.94"/>
+                    <circle  cx="450" cy="286" r="12" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>
+                    <path    d="M445,279 L455,279 L459,286 L455,293 L445,293 L441,286 Z" fill="rgba(0,0,0,0.22)"/>
+
+                    <!-- ══ PITCH MARKINGS ══ -->
+                    <!-- Goal line -->
+                    <line x1="0" y1="316" x2="900" y2="316" stroke="white" stroke-width="2.5"/>
+                    <!-- Penalty box -->
+                    <line x1="216" y1="316" x2="198" y2="435" stroke="white" stroke-width="1.8"/>
+                    <line x1="684" y1="316" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
+                    <line x1="198" y1="435" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
+                    <!-- Goal box -->
+                    <line x1="352" y1="316" x2="342" y2="368" stroke="white" stroke-width="1.4"/>
+                    <line x1="548" y1="316" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
+                    <line x1="342" y1="368" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
+                    <!-- Penalty spot -->
+                    <circle cx="450" cy="388" r="4.5" fill="white"/>
+                    <!-- Penalty arc -->
+                    <path d="M388,435 Q450,398 512,435" stroke="white" fill="none" stroke-width="1.8"/>
+
+                    <!-- ══ FLOODLIGHT TOWERS ══ -->
+                    <!-- Left tower -->
+                    <rect x="23" y="0"  width="10" height="240" fill="#252545"/>
+                    <rect x="19" y="0"  width="18" height="9"   fill="#35355a"/>
+                    <rect x="11" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
+                    <ellipse cx="28" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
+                    <ellipse cx="28" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
+                    <polygon points="12,20 45,20 520,318 0,318" fill="rgba(255,255,200,0.035)"/>
+                    <!-- Right tower -->
+                    <rect x="867" y="0"  width="10" height="240" fill="#252545"/>
+                    <rect x="863" y="0"  width="18" height="9"   fill="#35355a"/>
+                    <rect x="855" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
+                    <ellipse cx="872" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
+                    <ellipse cx="872" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
+                    <polygon points="855,20 888,20 900,318 380,318" fill="rgba(255,255,200,0.035)"/>
+
+                    <!-- Ground glow on pitch -->
+                    <ellipse cx="450" cy="400" rx="420" ry="110" fill="rgba(255,255,200,0.05)"/>
+                </svg>
+
+                <!-- Canvas confetti -->
+                <canvas id="celCanvas" class="cel-canvas"></canvas>
+
+                <!-- GOAL! banner -->
+                <div class="cel-goal-banner">
+                    <span class="cel-goal-word">⚽ GOAL! ⚽</span>
+                    <div class="cel-score-row">
+                        <span class="cel-score-club" id="celPlayerName">—</span>
+                        <span class="cel-score-num"  id="celScoreLine">0 - 0</span>
+                        <span class="cel-score-club" id="celCpuName">—</span>
+                    </div>
+                </div>
+
+                <!-- Players on pitch -->
+                <div class="cel-stage">
+                    <div class="cel-player-row">
+                        <div id="celMatesLeft"  class="cel-mates-group"></div>
+                        <div id="celScorerWrap"></div>
+                        <div id="celMatesRight" class="cel-mates-group"></div>
+                    </div>
+                    <div class="cel-pitch-shadow"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Management Panel Screen -->
+        <div class="screen active" id="managementScreen" style="flex-direction: column; height: 100%; overflow: hidden; padding: 20px;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 15px; flex-shrink: 0;">
+                <div id="managementCrest"></div>
+                <h2 style="text-align: center; color: #FFD700; text-transform: uppercase; font-size: 22px; letter-spacing: 3px; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); margin: 0;" id="managementTitle">⚽ TEAM CONTROL ⚽</h2>
+            </div>
+
+            <!-- Mobile-only player detail panel (shown between title and squad lists) -->
+            <div id="mobilePlayerDetail"></div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; flex: 1; overflow: hidden; min-height: 0;">
+                <!-- LEFT COLUMN: STARTING XI -->
+                <div class="squad-section">
+                    <div class="squad-title">⚽ STARTING XI</div>
+                    <div class="squad-list" id="startingXIList"></div>
+                </div>
+
+                <!-- CENTER COLUMN: FORMATION (PRE-MATCH) / DETAILS / INSTRUCTIONS / CONTROLS -->
+                <div style="display: flex; flex-direction: column; gap: 15px; overflow: hidden;">
+                    <!-- Formation Selector (pre-match only) -->
+                    <div id="mgmtFormationSelector" style="flex-shrink: 0; display: none;">
+                        <div style="color: #FFD700; font-weight: bold; font-size: 11px; text-align: center; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 1px;">⚙ Formation</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                            <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">4-4-2<div class="formation-desc">Balanced</div></button>
+                            <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">4-3-3<div class="formation-desc">Offensive</div></button>
+                            <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">5-3-2<div class="formation-desc">Defensive</div></button>
+                            <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)" style="padding: 8px; font-size: 13px;">3-4-3<div class="formation-desc">Attack</div></button>
+                        </div>
+                    </div>
+
+                    <!-- Player Details -->
+                    <div class="player-detail-panel" id="playerDetailPanel" style="flex: 1; overflow-y: auto; min-height: 0;">
+                        <div style="text-align: center; color: #FFD700; padding: 20px; font-weight: bold;">
+                            Tap a player to view details
+                        </div>
+                        <div class="player-detail-header" style="display: none;" id="playerDetailHeader">
+                            <div class="player-detail-avatar" id="playerDetailAvatar"></div>
+                            <div class="player-detail-info">
+                                <div class="player-detail-name" id="playerDetailName"></div>
+                                <div class="player-detail-position" id="playerDetailPosition"></div>
+                                <div class="player-detail-number" id="playerDetailNumber"></div>
+                            </div>
+                        </div>
+
+                        <div class="radar-chart-container" style="display: none;" id="radarChartContainer">
+                            <svg id="radarChart" width="200" height="200" viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg"></svg>
+                        </div>
+
+                        <div class="attribute-bars" id="attributeBars" style="display: none;"></div>
+
+                        <button class="close-detail-btn" id="closeDetailBtn" style="display: none;">Close Details</button>
+                    </div>
+
+                    <!-- Instructions -->
+                    <div class="instruction-panel" id="instructionPanel" style="flex-shrink: 0;">
+                        <div class="instruction-title">⚔️ Team Instructions</div>
+                        <div class="instruction-buttons">
+                            <button class="instruction-btn defensive active" data-instruction="defensive">🛡️ DEFENSIVE</button>
+                            <button class="instruction-btn neutral" data-instruction="neutral">⚖️ NEUTRAL</button>
+                            <button class="instruction-btn offensive" data-instruction="offensive">⚡ OFFENSIVE</button>
+                        </div>
+                    </div>
+
+                    <!-- Substitution Controls (in-match only) -->
+                    <div id="subControls" style="flex-shrink: 0; display: none;">
+                        <div class="management-info" id="managementInfo">👤 SELECT PLAYERS TO SWAP</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
+                            <button class="btn-primary" id="confirmSubBtn" disabled>Confirm Sub</button>
+                            <button class="btn-secondary" id="closeManageBtn">Close</button>
+                        </div>
+                    </div>
+
+                    <!-- Start Match Button (pre-match only) -->
+                    <div id="startMatchSection" style="flex-shrink: 0; display: none;">
+                        <button class="btn-primary" id="mgmtStartBtn" onclick="window.game.startMatch()" style="width: 100%; padding: 14px; font-size: 15px; letter-spacing: 2px; text-transform: uppercase;">▶ Start Match</button>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: BENCH -->
+                <div class="squad-section">
+                    <div class="squad-title">🔄 BENCH</div>
+                    <div class="squad-list" id="benchList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Screen -->
+        <div class="screen" id="resultScreen">
+            <div id="resultTeamsDisplay" class="result-teams"></div>
+            <div id="resultMessage" class="result-message"></div>
+            <div class="stats" id="finalStats">
+                <div class="stat">
+                    <div class="stat-label">Final Score</div>
+                    <div class="stat-value"><span id="finalPlayerScore">0</span>-<span id="finalCpuScore">0</span></div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Shots on Target</div>
+                    <div class="stat-value"><span id="finalPlayerShots">0</span>-<span id="finalCpuShots">0</span></div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Possession</div>
+                    <div class="stat-value"><span id="finalPlayerPoss">0</span>%-<span id="finalCpuPoss">0</span>%</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Total Passes</div>
+                    <div class="stat-value"><span id="finalPlayerPasses">0</span>-<span id="finalCpuPasses">0</span></div>
+                </div>
+            </div>
+
+            <div style="margin-top: 25px;">
+                <div id="goalsSection" style="display: none; margin-bottom: 16px;">
+                    <h3>⚽ Goals</h3>
+                    <div id="goalsList"></div>
+                </div>
+
+                <div id="substitutionsSection" style="display: none; margin-bottom: 16px;">
+                    <h3>🔄 Substitutions</h3>
+                    <div id="substitutionsList"></div>
+                </div>
+
+                <div id="cardsSection" style="display: none; margin-bottom: 16px;">
+                    <h3>📋 Cards</h3>
+                    <div id="cardsList"></div>
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="btn-primary" id="playAgainBtn">Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="game-flow.js"></script>
+    <script src="football-sim.js"></script>
+</body>
+</html>
