@@ -216,7 +216,58 @@
             border: 1px solid rgba(255,68,68,0.4);
             border-radius: var(--r-sm);
             font-variant-numeric: tabular-nums;
+            cursor: pointer;
+            user-select: none;
         }
+        .timer.debug-active {
+            border-color: var(--c-gold);
+            color: var(--c-gold);
+            background: rgba(255,215,0,0.10);
+        }
+
+        /* Debug zone-grid overlay — shown on triple-clicking the match clock */
+        .debug-overlay {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            pointer-events: none;
+            z-index: 5;
+        }
+        .debug-cell {
+            background: rgba(0, 0, 0, 0.18);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            position: relative;
+            /* Single-side borders to avoid doubling up where cells meet */
+            border-right:  1px dashed rgba(255, 255, 255, 0.30);
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.30);
+        }
+        /* Drop the trailing borders on the right column / bottom row */
+        .debug-overlay .debug-cell:nth-child(5n)         { border-right:  none; }
+        .debug-overlay .debug-cell:nth-last-child(-n+5)  { border-bottom: none; }
+        .debug-cell-coord {
+            position: absolute;
+            top: 2px; left: 4px;
+            font-size: 8px;
+            color: rgba(255,255,255,0.35);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .debug-num {
+            font-size: clamp(13px, 2.2vw, 22px);
+            font-weight: 900;
+            line-height: 1.05;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 5px rgba(0,0,0,0.4);
+            font-variant-numeric: tabular-nums;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .debug-num.empty { opacity: 0.25; font-weight: 600; }
 
         /* ── Pitch ─── */
         .match-content {
@@ -527,6 +578,24 @@
             text-shadow: none;
         }
 
+        /* Compact stamina bar — used in bench player items and formation-pitch slots */
+        .stamina-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 3px;
+        }
+        .stamina-bar-fill {
+            height: 100%;
+            border-radius: 1px;
+            transition: width 0.35s ease, background 0.35s ease;
+        }
+        /* In the formation-pitch slot, narrow the bar so it sits cleanly under the meta line */
+        .fm-player-slot .stamina-bar { width: 88%; margin: 2px auto 0; }
+
         .category-header {
             padding: 3px 10px;
             font-size: 9px;
@@ -702,6 +771,100 @@
             color: rgba(255,255,255,0.28); letter-spacing: 1px;
             pointer-events: none; z-index: 2;
         }
+
+        /* CM 01/02-style movement arrows: long dashed lines drawn over the pitch */
+        .fm-arrows-overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+            overflow: visible;
+            filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.55));
+        }
+
+        /* Drag-and-drop visual states */
+        .fm-player-slot.dragging,
+        .player-item.dragging      { opacity: 0.4; }
+        .fm-player-slot.drop-target,
+        .player-item.drop-target   { outline: 2px dashed var(--c-gold); outline-offset: 2px; background: rgba(255,215,0,0.18); }
+        .fm-pitch.drop-active      { box-shadow: inset 0 0 0 2px rgba(255,215,0,0.35); }
+        .squad-list.drop-active    { background: rgba(255,215,0,0.06); }
+
+        /* Floating context menu (right-click style) on player slot click */
+        .context-menu {
+            position: fixed;
+            min-width: 200px;
+            background: var(--c-bg-2);
+            border: 2px solid var(--c-gold);
+            border-radius: var(--r-md);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.55);
+            z-index: 200;
+            padding: 6px;
+            font-size: 12px;
+        }
+        .context-menu-header {
+            color: var(--c-gold);
+            font-weight: 700;
+            padding: 6px 10px 8px;
+            border-bottom: 1px solid rgba(255,215,0,0.25);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+        .context-menu-item {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%;
+            padding: 9px 10px;
+            background: transparent;
+            border: none;
+            color: var(--c-text-1);
+            text-align: left;
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .context-menu-item:hover { background: var(--c-bg-3); color: var(--c-gold); }
+
+        /* Wider popover for the instructions panel; narrower one for the arrow grid */
+        .context-menu.popover-wide  { min-width: 260px; max-width: 320px; padding: 10px; }
+        .context-menu.popover-arrow { min-width: 160px; padding: 8px; }
+        .context-menu.popover-wide .tactic-row    { margin-bottom: 6px; }
+        .context-menu.popover-wide .tactic-label  { font-size: 10px; }
+        .context-menu.popover-wide .tactic-btn    { font-size: 10px; padding: 5px 6px; }
+        .context-menu.popover-arrow .arrow-picker { margin-top: 0; }
+
+        /* Compact arrow direction picker (3×3 compass) used inside instructions */
+        .arrow-picker {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .arrow-picker-cell {
+            aspect-ratio: 1 / 1;
+            background: var(--c-bg-3);
+            border: 1px solid var(--c-border-gold);
+            color: var(--c-gold);
+            border-radius: var(--r-sm);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1;
+            padding: 0;
+            transition: background var(--t-fast), border-color var(--t-fast);
+        }
+        .arrow-picker-cell:hover { background: var(--c-bg-4); }
+        .arrow-picker-cell.active {
+            background: var(--c-gold);
+            color: #000;
+            border-color: var(--c-gold);
+        }
+        .arrow-picker-cell.clear { color: var(--c-red); font-size: 11px; }
 
         /* ── Sub / Management Info ─── */
         .management-info {
@@ -1219,6 +1382,11 @@
                 <!-- Pitch Visualization -->
                 <div class="pitch-container">
                     <svg id="pitchSVG"></svg>
+
+                    <!-- Debug overlay: triple-click the match clock to toggle.
+                         Renders a 5×3 grid of zones (5 vertical bands × 3 lateral lanes).
+                         Each cell shows both teams' combined player strength in that zone. -->
+                    <div id="debugOverlay" class="debug-overlay" style="display:none;"></div>
                     <div id="celebrationScreen" style="display:none; position:absolute; inset:0;">
                         <div class="cel-wrap">
                             <!-- Stadium background SVG -->
@@ -1647,6 +1815,26 @@
             </div>
         </div>
 
+        <!-- Floating context menu (shown on clicking a starting-XI slot) -->
+        <div id="playerContextMenu" class="context-menu" style="display:none;" role="menu">
+            <div class="context-menu-header" id="playerContextMenuTitle">Player</div>
+            <button class="context-menu-item" data-action="details" type="button">📋 View Details</button>
+            <button class="context-menu-item" data-action="instructions" type="button">⚙ Set Instructions</button>
+            <button class="context-menu-item" data-action="arrow" type="button">🎯 Set Movement Arrow</button>
+        </div>
+
+        <!-- Floating instructions popover -->
+        <div id="playerInstructionsMenu" class="context-menu popover-wide" style="display:none;">
+            <div class="context-menu-header" id="playerInstructionsMenuTitle">Instructions</div>
+            <div id="playerInstructionsMenuBody"></div>
+        </div>
+
+        <!-- Floating movement-arrow popover -->
+        <div id="playerArrowMenu" class="context-menu popover-arrow" style="display:none;">
+            <div class="context-menu-header" id="playerArrowMenuTitle">Movement Arrow</div>
+            <div id="playerArrowMenuBody"></div>
+        </div>
+
         <!-- Management Panel Screen -->
         <div class="screen active" id="managementScreen" style="flex-direction: column; height: 100%; overflow: hidden; padding: 20px;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 15px; flex-shrink: 0;">
@@ -1799,6 +1987,7 @@
     </div>
 
     <script src="game-flow.js"></script>
+    <script src="zone-strength.js"></script>
     <script src="football-sim.js"></script>
 </body>
 </html>

@@ -228,9 +228,47 @@
                     playerG.appendChild(nameText);
                 }
 
+                // Stamina bar above the player circle (background + filled portion).
+                // The fill width and color are updated live as stamina drains during the match.
+                const STAM_W = 16, STAM_H = 2.5;
+                const stamBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                stamBg.setAttribute('x', coords.x - STAM_W / 2);
+                stamBg.setAttribute('y', coords.y - radius - 6);
+                stamBg.setAttribute('width',  STAM_W);
+                stamBg.setAttribute('height', STAM_H);
+                stamBg.setAttribute('rx', 1);
+                stamBg.setAttribute('fill', 'rgba(0,0,0,0.65)');
+                stamBg.setAttribute('stroke', 'rgba(255,255,255,0.4)');
+                stamBg.setAttribute('stroke-width', '0.3');
+                playerG.appendChild(stamBg);
+
+                const stamFill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                stamFill.setAttribute('x', coords.x - STAM_W / 2);
+                stamFill.setAttribute('y', coords.y - radius - 6);
+                stamFill.setAttribute('width',  STAM_W);
+                stamFill.setAttribute('height', STAM_H);
+                stamFill.setAttribute('rx', 1);
+                stamFill.setAttribute('fill', '#22C55E');
+                playerG.appendChild(stamFill);
+
                 this.svg.appendChild(playerG);
-                this.playerVisuals[playerId] = { element: playerG, x: coords.x, y: coords.y, pitchX: x, pitchY: y };
+                this.playerVisuals[playerId] = {
+                    element: playerG, x: coords.x, y: coords.y, pitchX: x, pitchY: y,
+                    staminaFill: stamFill, staminaWidth: STAM_W,
+                };
                 return playerG;
+            }
+
+            // Live-update a player's stamina bar (called from updateStats each tick).
+            updateStamina(playerId, stamina) {
+                const v = this.playerVisuals[playerId];
+                if (!v || !v.staminaFill) return;
+                const pct = Math.max(0, Math.min(100, stamina));
+                v.staminaFill.setAttribute('width', (v.staminaWidth * pct / 100).toFixed(2));
+                v.staminaFill.setAttribute('fill',
+                    pct < 30 ? '#EF4444' :  // red
+                    pct < 60 ? '#FACC15' :  // yellow
+                               '#22C55E');  // green
             }
 
             renderBall(x, y) {
@@ -696,6 +734,35 @@
         }
 
         class Team {
+            // CM 01/02-style individual player instructions, sensible defaults by position.
+            static defaultInstructions(position) {
+                const inst = {
+                    forwardRuns:  'mixed',   // often | mixed | rarely
+                    runWithBall:  'mixed',   // often | mixed | rarely
+                    longShots:    'mixed',   // often | mixed | rarely
+                    throughBalls: 'mixed',   // often | mixed | rarely
+                    holdUpBall:   'no',      // yes | no
+                    freeRole:     'no',      // yes | no
+                    arrow:        null,      // null | 'forward' | 'back' | 'left' | 'right' | 'forward-left' | 'forward-right' | 'back-left' | 'back-right'
+                };
+                if (['ST','CF'].includes(position)) {
+                    inst.forwardRuns = 'often'; inst.holdUpBall = 'yes'; inst.longShots = 'often';
+                } else if (['LW','RW'].includes(position)) {
+                    inst.forwardRuns = 'often'; inst.runWithBall = 'often';
+                } else if (position === 'CAM') {
+                    inst.forwardRuns = 'often'; inst.runWithBall = 'often'; inst.throughBalls = 'often';
+                } else if (['LM','RM','LWB','RWB'].includes(position)) {
+                    inst.runWithBall = 'often';
+                } else if (position === 'CM') {
+                    inst.throughBalls = 'often';
+                } else if (['CB','CDM','LB','RB'].includes(position)) {
+                    inst.forwardRuns = 'rarely'; inst.runWithBall = 'rarely'; inst.longShots = 'rarely';
+                } else if (position === 'GK') {
+                    inst.forwardRuns = 'rarely'; inst.runWithBall = 'rarely'; inst.longShots = 'rarely';
+                }
+                return inst;
+            }
+
             constructor(teamName, excludedColor = null) {
                 this.teamName = teamName;
                 const jerseyColors = ['#FF0000', '#0000FF', '#FFFF00', '#FF6600', '#FF00FF', '#00FFFF', '#FF4444'];
@@ -737,6 +804,7 @@
                         assists: 0,
                         isOnField: false,
                         avatar: AvatarGenerator.generateAvatar(i, this.jerseyColor),
+                        instructions: Team.defaultInstructions(position),
                         ...attributes
                     });
                 }
@@ -1066,6 +1134,9 @@
                 this._phaseTicks  = 0;
                 this.matchSpeed   = 'fast';   // 'slow' | 'normal' | 'fast' — 'fast' preserves legacy 500ms/1000ms pace
                 this._cpuLastFormationChangeMinute = 0;  // CPU AI cooldown tracker
+                this.debugMode    = false;   // toggled by triple-clicking the match clock
+                this._timerClickCount = 0;
+                this._timerClickTimer = null;
                 this.rules = new FootballRules();
                 console.log('Creating PitchRenderer...');
                 this.pitchRenderer = new PitchRenderer();
@@ -1106,6 +1177,10 @@
 
                     const pauseBtn = document.getElementById('pauseBtn');
                     if (pauseBtn) pauseBtn.addEventListener('click', () => this.togglePause());
+
+                    // Triple-click on the match clock toggles debug mode (zone-rating overlay).
+                    const timerEl = document.getElementById('timer');
+                    if (timerEl) timerEl.addEventListener('click', () => this._registerTimerClick());
 
                     const manageBtn = document.getElementById('manageBtn');
                     if (manageBtn) manageBtn.addEventListener('click', () => this.openManagement());
@@ -1177,6 +1252,13 @@
                 return '#EF4444';                  // red — terrible
             }
 
+            // Stamina bar colour scale: red → yellow → green
+            _staminaColor(stamina) {
+                if (stamina < 30) return '#EF4444';
+                if (stamina < 60) return '#FACC15';
+                return '#22C55E';
+            }
+
             // Compute a goalkeeper jersey colour from the outfield kit with maximum contrast.
             //   1. Convert team RGB → HSL.
             //   2. Rotate hue 180° (complementary).
@@ -1230,7 +1312,7 @@
                 return player.position === 'GK' ? this._gkJerseyColor(teamColor) : teamColor;
             }
 
-            showPlayerDetail(player) {
+            showPlayerDetail(player, opts = {}) {
                 const overlay = document.getElementById('playerDetailOverlay');
                 const content = document.getElementById('playerDetailOverlayContent');
                 if (!overlay || !content) return;
@@ -1429,6 +1511,27 @@
                 });
             }
 
+            // CM 01/02-style per-player instruction panel, rendered inside the detail overlay.
+            // Update a player's instruction and propagate to the live on-field copy.
+            setPlayerInstruction(player, key, value) {
+                if (!player) return;
+                if (!player.instructions) player.instructions = Team.defaultInstructions(player.position);
+                player.instructions[key] = value;
+                // Sync the on-field clone (spread copies in setupSquad/subs mean we have two refs)
+                const onField = this.playerTeam?.onField?.find(p => p.id === player.id);
+                if (onField && onField !== player) {
+                    onField.instructions = { ...player.instructions };
+                }
+                const bench = this.playerTeam?.bench?.find(p => p.id === player.id);
+                if (bench && bench !== player) {
+                    bench.instructions = { ...player.instructions };
+                }
+                const roster = this.playerTeam?.players?.find(p => p.id === player.id);
+                if (roster && roster !== player) {
+                    roster.instructions = { ...player.instructions };
+                }
+            }
+
             selectFormation(btn) {
                 try {
                     console.log('selectFormation called with:', btn);
@@ -1529,6 +1632,16 @@
                 }
             }
 
+            // Build the id → player map MatchFlow uses to read per-player instructions.
+            // Called once at match start and again after every substitution / formation change.
+            _refreshMatchFlowPlayerInfo() {
+                if (!this.matchFlow) return;
+                const info = {};
+                this.playerTeam?.onField?.forEach((p, i) => { info[i]       = p; });
+                this.cpuTeam?.onField?.forEach   ((p, i) => { info[i + 100] = p; });
+                this.matchFlow.setPlayerInfo(info);
+            }
+
             setupPitchPlayers() {
                 try {
                     console.log('setupPitchPlayers called');
@@ -1539,6 +1652,18 @@
                     const playerPositions = this.pitchRenderer.calculatePositions(formPlayer, 1);
                     const cpuPositions = this.pitchRenderer.calculatePositions(formCpu, 2);
                     console.log('Calculated positions. Player count:', playerPositions.length, 'CPU count:', cpuPositions.length);
+
+                    // Apply customPos overrides for any player team starter that's been dragged on
+                    // the formation view. Formation-view coords are (x: 0–100, y: 0–100) with the GK
+                    // at the bottom — translate to match-pitch coords where player team's GK is at x≈8.
+                    this.playerTeam.onField.forEach((player, idx) => {
+                        if (player.customPos && idx < playerPositions.length) {
+                            playerPositions[idx] = {
+                                x: 100 - player.customPos.y,
+                                y: player.customPos.x,
+                            };
+                        }
+                    });
 
                     console.log('Rendering player team...');
                     this.playerTeam.onField.forEach((player, idx) => {
@@ -1566,6 +1691,7 @@
                     if (this.matchFlow) this.matchFlow.stop();
                     this.matchFlow = new MatchFlow(this.pitchRenderer, this.animationEngine);
                     this.matchFlow.init(playerPositions, cpuPositions);
+                    this._refreshMatchFlowPlayerInfo();
                     this.matchFlow.start();
                     console.log('MatchFlow started');
                 } catch (error) {
@@ -1701,57 +1827,14 @@
             }
 
             // CM 03/04-style zone ratings: weighted attribute averages per zone
+            // 3-band engine ratings and the formation-bonus table now live in zone-strength.js
+            // — these stay as instance methods so existing call sites work unchanged.
             getZoneRatings(teamObj, formation) {
-                if (!teamObj || teamObj.onField.length === 0) return { attack: 50, midfield: 50, defense: 50 };
-
-                const bonus = this.getFormationBonus(formation);
-                let atkSum = 0, atkN = 0, midSum = 0, midN = 0, defSum = 0, defN = 0;
-
-                teamObj.onField.forEach(p => {
-                    const sf = Math.max(0.5, p.stamina / 100); // stamina factor
-                    const det = (p.determination || 70) / 100;
-                    const fatigueMult = sf + (1 - sf) * det * 0.5; // determination softens fatigue
-
-                    if (['ST', 'CF', 'LW', 'RW', 'CAM'].includes(p.position)) {
-                        const r = ((p.finishing || 50) * 0.30 + (p.offTheBall || 50) * 0.25 +
-                                   (p.composure || 50) * 0.20 + (p.dribbling || 50) * 0.15 +
-                                   (p.heading || 50) * 0.10) * fatigueMult;
-                        atkSum += r; atkN++;
-                    } else if (['CM', 'CDM', 'LM', 'RM'].includes(p.position)) {
-                        const r = ((p.passing || 50) * 0.25 + (p.vision || 50) * 0.20 +
-                                   (p.creativity || 50) * 0.20 + (p.tackling || 50) * 0.15 +
-                                   (p.stamina || 50) * 0.10 + (p.anticipation || 50) * 0.10) * fatigueMult;
-                        midSum += r; midN++;
-                    } else if (['CB', 'LB', 'RB', 'LWB', 'RWB'].includes(p.position)) {
-                        const r = ((p.marking || 50) * 0.30 + (p.tackling || 50) * 0.25 +
-                                   (p.heading || 50) * 0.20 + (p.anticipation || 50) * 0.15 +
-                                   (p.strength || 50) * 0.10) * fatigueMult;
-                        defSum += r; defN++;
-                    } else if (p.position === 'GK') {
-                        const r = ((p.reflexes || 50) * 0.35 + (p.handling || 50) * 0.30 +
-                                   (p.positioning || 50) * 0.20 + (p.composure || 50) * 0.15) * fatigueMult;
-                        defSum += r; defN++;
-                    }
-                });
-
-                return {
-                    attack:   (atkN  > 0 ? atkSum  / atkN  : 50) * bonus.attack,
-                    midfield: (midN  > 0 ? midSum  / midN  : 50) * bonus.midfield,
-                    defense:  (defN  > 0 ? defSum  / defN  : 50) * bonus.defense,
-                };
+                return ZoneStrength.bandRatings(teamObj, formation);
             }
 
             getFormationBonus(formation) {
-                const bonuses = {
-                    '442': { attack: 1.00, midfield: 1.00, defense: 1.00 },
-                    '433': { attack: 1.10, midfield: 0.95, defense: 0.95 },
-                    '451': { attack: 0.92, midfield: 1.18, defense: 1.00 },
-                    '532': { attack: 0.90, midfield: 1.00, defense: 1.10 },
-                    '541': { attack: 0.82, midfield: 1.05, defense: 1.20 },
-                    '352': { attack: 1.05, midfield: 1.12, defense: 0.88 },
-                    '343': { attack: 1.12, midfield: 1.05, defense: 0.88 },
-                };
-                return bonuses[formation] || bonuses['442'];
+                return ZoneStrength.formationBonus(formation);
             }
 
             generateEvent() {
@@ -1911,8 +1994,14 @@
                     return;
                 }
 
-                // Speculative long shot from outside the box — ends the attack
-                if (Math.random() < 0.08) {
+                // Speculative long shot from outside the box — ends the attack.
+                // Probability scales with how many onfield mids have longShots: often.
+                const teamObjLS = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const oftenShooters = teamObjLS?.onField?.filter(p =>
+                    ['CM','CAM','CDM','LM','RM'].includes(p.position) && p.instructions?.longShots === 'often'
+                ).length || 0;
+                const lsProb = Math.min(0.20, 0.06 + oftenShooters * 0.035);
+                if (Math.random() < lsProb) {
                     this.longShotEvent(team);
                     this._attackPhase = null;
                     this._attackTeam  = null;
@@ -1920,8 +2009,14 @@
                     return;
                 }
 
-                // Mazy dribble past defenders — pushes attack on if successful
-                if (Math.random() < 0.10) {
+                // Mazy dribble past defenders — pushes attack on if successful.
+                // Boosted by onfield wingers with runWithBall: often.
+                const teamObjDB = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const oftenRunners = teamObjDB?.onField?.filter(p =>
+                    ['LW','RW','CAM','ST','CF','LM','RM'].includes(p.position) && p.instructions?.runWithBall === 'often'
+                ).length || 0;
+                const dribProb = Math.min(0.22, 0.08 + oftenRunners * 0.025);
+                if (Math.random() < dribProb) {
                     this.dribbleEvent(team);
                     return; // stay in progression
                 }
@@ -1933,12 +2028,23 @@
                 const pasMod = team === 'player'
                     ? ({ 'direct': 0, 'mixed': 0, 'short': 1 }[this.tactics.passing] ?? 0)
                     : 0;
-                const maxProg = menMod + pasMod; // 0–3
+                // CM 01/02 hold-up-ball instruction: any onfield forward set to 'yes' extends the
+                // final-third buildup by +1 tick (slowing the attack to recycle/wait for support).
+                const teamObjForHold = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const holdMod = teamObjForHold?.onField?.some(p =>
+                    ['ST','CF','CAM'].includes(p.position) && p.instructions?.holdUpBall === 'yes'
+                ) ? 1 : 0;
+                const maxProg = menMod + pasMod + holdMod; // 0–4
 
                 if (this._phaseTicks > maxProg) {
-                    // 25% of final balls are a defence-splitting through ball
-                    if (Math.random() < 0.25) this.throughBallEvent(team);
-                    else                      this.passEvent(team);
+                    // Final ball: through-ball frequency scales with how many onfield playmakers
+                    // have throughBalls: often (base 18 %, up to ~50 %).
+                    const oftenPassers = teamObjForHold?.onField?.filter(p =>
+                        ['CAM','CM','LW','RW'].includes(p.position) && p.instructions?.throughBalls === 'often'
+                    ).length || 0;
+                    const tbProb = Math.min(0.55, 0.18 + oftenPassers * 0.10);
+                    if (Math.random() < tbProb) this.throughBallEvent(team);
+                    else                        this.passEvent(team);
                     this._attackPhase = 'danger';
                     this._phaseTicks  = 0;
                 } else {
@@ -2018,10 +2124,11 @@
                 const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
                 if (teamObj.onField.length === 0) return;
 
-                // Prefer attackers (ST/CF/LW/RW/CAM) as scorer
+                // Prefer attackers (ST/CF/LW/RW/CAM) as scorer, biased by their forwardRuns
+                // instruction so "often" runners are more likely to be on the end of moves.
                 const attackers = teamObj.onField.filter(p => ['ST','CF','LW','RW','CAM'].includes(p.position));
                 const scorer = attackers.length > 0
-                    ? attackers[Math.floor(Math.random() * attackers.length)]
+                    ? this._pickByInstruction(attackers, 'forwardRuns')
                     : teamObj.getRandomPlayer(true);
                 const assist = Math.random() > 0.35 ? teamObj.getRandomPlayer(true) : null;
 
@@ -2079,9 +2186,12 @@
 
             chanceEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
-                // Prefer off-the-ball movement positions
+                // Prefer off-the-ball movement positions, weighted by forwardRuns instruction
+                // so 'often' runners get into shooting positions more frequently.
                 const movers = teamObj.onField.filter(p => ['ST','CF','CAM','LW','RW'].includes(p.position));
-                const player = movers.length > 0 ? movers[Math.floor(Math.random() * movers.length)] : teamObj.getRandomPlayer(true);
+                const player = movers.length > 0
+                    ? this._pickByInstruction(movers, 'forwardRuns')
+                    : teamObj.getRandomPlayer(true);
                 const otb = player.offTheBall || player.offensive || 70;
                 const quality = otb > 82 ? 'Clear' : otb > 68 ? 'Good' : 'Half';
                 if (team === 'player') {
@@ -2479,12 +2589,28 @@
                 }
             }
 
+            // Weighted pick: choose by instruction weight. `often`→3, `mixed`→1, `rarely`→filtered out upstream.
+            _pickByInstruction(pool, instKey) {
+                if (!pool.length) return null;
+                const weights = pool.map(p => ({ often: 3, mixed: 1, rarely: 0.15, yes: 3, no: 1 }[p.instructions?.[instKey]] ?? 1));
+                const total = weights.reduce((s, w) => s + w, 0);
+                if (total <= 0) return pool[Math.floor(Math.random() * pool.length)];
+                let r = Math.random() * total;
+                for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
+                return pool[pool.length - 1];
+            }
+
             longShotEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
-                // Midfielders take long shots more often
+                // Midfielders take long shots more often. Player instruction (longShots: often/mixed/rarely)
+                // weights selection; 'rarely' players opt out unless no one else is eligible.
                 const mids = teamObj.onField.filter(p => ['CM','CAM','CDM','LM','RM'].includes(p.position));
-                const shooter = mids.length ? mids[Math.floor(Math.random() * mids.length)] : teamObj.getRandomPlayer(true);
+                const eligible = mids.filter(p => p.instructions?.longShots !== 'rarely');
+                const pool = eligible.length ? eligible : mids;
+                const shooter = pool.length
+                    ? this._pickByInstruction(pool, 'longShots')
+                    : teamObj.getRandomPlayer(true);
                 const gk = defTeamObj.onField.find(p => p.position === 'GK');
 
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
@@ -2532,8 +2658,13 @@
 
             throughBallEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                // Players told to play through balls 'often' are heavily preferred as the passer.
                 const playmakers = teamObj.onField.filter(p => ['CAM','CM','LW','RW'].includes(p.position));
-                const passer = playmakers.length ? playmakers[Math.floor(Math.random() * playmakers.length)] : teamObj.getRandomPlayer(true);
+                const eligible = playmakers.filter(p => p.instructions?.throughBalls !== 'rarely');
+                const passerPool = eligible.length ? eligible : playmakers;
+                const passer = passerPool.length
+                    ? this._pickByInstruction(passerPool, 'throughBalls')
+                    : teamObj.getRandomPlayer(true);
                 const runners  = teamObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position) && p.id !== passer.id);
                 const receiver = runners.length ? runners[Math.floor(Math.random() * runners.length)] : teamObj.getRandomPlayer(true);
                 this.addEvent(`✨ <b class="ev-name">${passer.name}</b> slides a perfect through ball to <b class="ev-name">${receiver.name}</b>!`, 'pass', team);
@@ -2542,8 +2673,13 @@
 
             dribbleEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
-                const wingers = teamObj.onField.filter(p => ['LW','RW','CAM','ST','CF'].includes(p.position));
-                const dribbler = wingers.length ? wingers[Math.floor(Math.random() * wingers.length)] : teamObj.getRandomPlayer(true);
+                // Wingers/forwards run with the ball; instruction (runWithBall) biases who attempts it.
+                const wingers = teamObj.onField.filter(p => ['LW','RW','CAM','ST','CF','LM','RM'].includes(p.position));
+                const eligible = wingers.filter(p => p.instructions?.runWithBall !== 'rarely');
+                const pool = eligible.length ? eligible : wingers;
+                const dribbler = pool.length
+                    ? this._pickByInstruction(pool, 'runWithBall')
+                    : teamObj.getRandomPlayer(true);
                 const drib = (dribbler.dribbling || 60) / 100;
                 if (Math.random() < drib * 0.7) {
                     this.addEvent(`🏃 <b class="ev-name">${dribbler.name}</b> dances past two defenders!`, 'pass', team);
@@ -2699,11 +2835,20 @@
                 if (this.playerTeam) this.playerTeam.onField.forEach(drainPlayer);
                 if (this.cpuTeam) this.cpuTeam.onField.forEach(drainPlayer);
 
+                // Live-refresh the per-player stamina bars on the match pitch.
+                if (this.pitchRenderer) {
+                    this.playerTeam?.onField?.forEach((p, i) => this.pitchRenderer.updateStamina(i,       p.stamina));
+                    this.cpuTeam?.onField?.forEach   ((p, i) => this.pitchRenderer.updateStamina(100 + i, p.stamina));
+                }
+
                 // Momentum drifts slowly back to 50 (regression)
                 this.momentum += (50 - this.momentum) * 0.02;
 
                 // CPU manager reviews tactics periodically (sampled to avoid every-tick cost)
                 if (Math.random() < 0.15) this._evaluateCpuFormation();
+
+                // Keep the debug overlay numbers fresh
+                if (this.debugMode) this._updateDebugOverlay();
             }
 
             updateUI() {
@@ -2748,6 +2893,70 @@
             togglePause() {
                 this.isPaused = !this.isPaused;
                 document.getElementById('pauseBtn').textContent = this.isPaused ? 'Resume' : 'Pause';
+            }
+
+            // Triple-click counter on the match clock — three clicks within 1500 ms toggles debug.
+            _registerTimerClick() {
+                this._timerClickCount += 1;
+                if (this._timerClickTimer) clearTimeout(this._timerClickTimer);
+                if (this._timerClickCount >= 3) {
+                    this._timerClickCount = 0;
+                    this._toggleDebugMode();
+                    return;
+                }
+                this._timerClickTimer = setTimeout(() => { this._timerClickCount = 0; }, 1500);
+            }
+
+            _toggleDebugMode() {
+                this.debugMode = !this.debugMode;
+                const overlay = document.getElementById('debugOverlay');
+                const timerEl = document.getElementById('timer');
+                if (overlay) overlay.style.display = this.debugMode ? 'grid' : 'none';
+                if (timerEl) timerEl.classList.toggle('debug-active', this.debugMode);
+                if (this.debugMode) this._updateDebugOverlay();
+            }
+
+            // Debug-overlay grid strengths — delegates to ZoneStrength.gridStrengths, supplying
+            // the live home-position lookup (matchFlow._home) and the simulator's calculateOverall.
+            _computeGridZoneStrengths(bands = 5, lanes = 3) {
+                return ZoneStrength.gridStrengths({
+                    playerTeam:  this.playerTeam,
+                    cpuTeam:     this.cpuTeam,
+                    homeLookup:  (idx, isPlayer) => this.matchFlow?._home?.get(isPlayer ? idx : 100 + idx),
+                    overallOf:   (p) => this.calculateOverall(p),
+                    bands, lanes,
+                });
+            }
+
+            _updateDebugOverlay() {
+                if (!this.debugMode || !this.playerTeam || !this.cpuTeam) return;
+                const overlay = document.getElementById('debugOverlay');
+                if (!overlay || overlay.style.display === 'none') return;
+
+                const bands = 5, lanes = 3;
+                const data  = this._computeGridZoneStrengths(bands, lanes);
+                const pColor = this.playerTeam.jerseyColor || '#FFFFFF';
+                const cColor = this.cpuTeam.jerseyColor    || '#FFFFFF';
+
+                // CSS-grid order: lanes are rows (top→bottom = top of pitch→bottom),
+                // bands are columns (left→right = own-goal→opponent-goal for player team).
+                let html = '';
+                for (let l = 0; l < lanes; l++) {
+                    for (let b = 0; b < bands; b++) {
+                        const cell = data[l * bands + b];
+                        const coord = `B${b + 1}·L${l + 1}`;
+                        const p = cell.player, c = cell.cpu;
+                        html += `
+                            <div class="debug-cell">
+                                <span class="debug-cell-coord">${coord}</span>
+                                <span class="debug-num${p == null ? ' empty' : ''}"
+                                      style="color:${pColor};">${p == null ? '—' : p}</span>
+                                <span class="debug-num${c == null ? ' empty' : ''}"
+                                      style="color:${cColor};">${c == null ? '—' : c}</span>
+                            </div>`;
+                    }
+                }
+                overlay.innerHTML = html;
             }
 
             openManagement() {
@@ -2805,6 +3014,56 @@
 
                 const fmtLabels = { '442':'4-4-2','433':'4-3-3','451':'4-5-1','532':'5-3-2','541':'5-4-1','352':'3-5-2','343':'3-4-3' };
 
+                // Build the players' positions list (so we can also draw arrow overlays for them)
+                const slotPositions = ordered.map((p, i) => {
+                    if (!p || !coords[i]) return null;
+                    const [defX, defY] = coords[i];
+                    return {
+                        p,
+                        defX, defY,
+                        cx: p.customPos ? p.customPos.x : defX,
+                        cy: p.customPos ? p.customPos.y : defY,
+                    };
+                });
+
+                // CM 01/02-style arrow overlay — long dashed lines from each player's slot to
+                // their movement target. Drawn as an SVG that fills the pitch and is non-interactive.
+                const arrowsSvg = `
+                    <svg class="fm-arrows-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <defs>
+                            <marker id="fmArrowHead" viewBox="0 0 10 10" markerUnits="userSpaceOnUse"
+                                    markerWidth="4" markerHeight="4" refX="8" refY="5" orient="auto">
+                                <path d="M0,0 L10,5 L0,10 L2.5,5 Z" fill="#FFD700"/>
+                            </marker>
+                        </defs>
+                        ${slotPositions.map(s => {
+                            if (!s) return '';
+                            const dir = s.p.instructions?.arrow;
+                            if (!dir) return '';
+                            const t = this._arrowOffsetForView(dir);
+                            if (!t) return '';
+                            // Start the line at the OUTER edge of the player card on the side the
+                            // arrow points toward (so the line emerges from the front of the
+                            // player and continues outward). The slot is approximated as a small
+                            // rectangle in pitch-percent (rx≈5.5, ry≈6.5).
+                            const len = Math.hypot(t.dx, t.dy);
+                            const ux  = t.dx / len, uy = t.dy / len;
+                            const rx = 5.5, ry = 6.5;
+                            const edge = ux === 0 ? ry
+                                       : uy === 0 ? rx
+                                       : Math.min(rx / Math.abs(ux), ry / Math.abs(uy));
+                            const sx = s.cx + ux * edge;
+                            const sy = s.cy + uy * edge;
+                            const ex = Math.max(2, Math.min(98, s.cx + t.dx));
+                            const ey = Math.max(2, Math.min(98, s.cy + t.dy));
+                            return `<line x1="${sx.toFixed(2)}" y1="${sy.toFixed(2)}" x2="${ex.toFixed(2)}" y2="${ey.toFixed(2)}"
+                                          stroke="#FFD700" stroke-width="0.7" stroke-linecap="round"
+                                          stroke-dasharray="2,1.4" marker-end="url(#fmArrowHead)"
+                                          opacity="0.9"/>`;
+                        }).join('')}
+                    </svg>
+                `;
+
                 pitch.innerHTML = `
                     <div class="fm-field-lines">
                         <div class="fm-line-center"></div>
@@ -2812,32 +3071,65 @@
                         <div class="fm-box-top"></div>
                         <div class="fm-box-bot"></div>
                     </div>
-                    ${ordered.map((p, i) => {
-                        if (!p || !coords[i]) return '';
-                        const [cx, cy] = coords[i];
+                    ${arrowsSvg}
+                    ${slotPositions.map(s => {
+                        if (!s) return '';
+                        const { p, defX, defY, cx, cy } = s;
                         const lastName  = p.name.trim().split(/\s+/).pop();
                         const ovr       = this.calculateOverall(p);
                         const sel       = this.selectedPlayerOut?.id === p.id;
                         const avatarSVG = AvatarGenerator.createSVG(p.avatar, 34, this._jerseyFor(p, this.playerTeam.jerseyColor));
                         const ovrColor  = this._overallColor(ovr);
+                        const stamPct = Math.max(0, Math.min(100, Math.round(p.stamina ?? 100)));
+                        const stamCol = this._staminaColor(stamPct);
                         return `<button class="fm-player-slot${sel ? ' selected' : ''}"
                                 style="left:${cx}%;top:${cy}%;transform:translate(-50%,-50%);"
-                                data-player-id="${p.id}">
+                                draggable="true"
+                                data-player-id="${p.id}"
+                                data-default-x="${defX}" data-default-y="${defY}">
                             <div class="fm-player-avatar">${avatarSVG}</div>
                             <span class="fm-player-name">${lastName}</span>
                             <span class="fm-player-meta">${p.position} · <b style="color:${ovrColor};">${ovr}</b></span>
+                            <div class="stamina-bar" title="Stamina ${stamPct}%">
+                                <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
+                            </div>
                         </button>`;
                     }).join('')}
                     <div class="fm-formation-label">${fmtLabels[formation] || formation}</div>
                 `;
 
+                // Wire click → context menu, plus drag handlers.
                 pitch.querySelectorAll('.fm-player-slot').forEach(btn => {
-                    const lookup = () => squad.find(pl => pl.id === parseInt(btn.dataset.playerId));
-                    this._bindClicks(btn,
-                        () => { const p = lookup(); if (p) this.selectPlayer(p, true); },
-                        () => { const p = lookup(); if (p) this.showPlayerDetail(p); }
-                    );
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const id = parseInt(btn.dataset.playerId);
+                        const p  = squad.find(pl => pl.id === id);
+                        if (p) this._showPlayerContextMenu(p, e.clientX, e.clientY);
+                    });
+                    this._bindSlotDrag(btn, 'xi');
                 });
+                // Make the pitch area itself a drop target (for repositioning + dropping bench players)
+                this._bindPitchDropZone(pitch);
+            }
+
+            // Arrow direction → (dx, dy) target offset in formation-pitch percent coords.
+            // For the player team the pitch is rendered with the opponent's goal at the TOP,
+            // so "forward" decreases y. Lengths are deliberately big (≈20 pitch %) so the line
+            // looks like a CM 01/02 run-direction marker, not a tiny icon.
+            _arrowOffsetForView(arrow) {
+                const LEN  = 20;
+                const DIAG = Math.round(LEN * 0.72);   // ≈ LEN / √2
+                const map = {
+                    'forward':       { dx:  0,    dy: -LEN  },
+                    'back':          { dx:  0,    dy:  LEN  },
+                    'left':          { dx: -LEN,  dy:  0    },
+                    'right':         { dx:  LEN,  dy:  0    },
+                    'forward-left':  { dx: -DIAG, dy: -DIAG },
+                    'forward-right': { dx:  DIAG, dy: -DIAG },
+                    'back-left':     { dx: -DIAG, dy:  DIAG },
+                    'back-right':    { dx:  DIAG, dy:  DIAG },
+                };
+                return map[arrow] || null;
             }
 
             // Single click vs. double click: defer the single-click action briefly so a
@@ -2854,6 +3146,346 @@
                 });
             }
 
+            // ─── Player context menu (shown on click of a starting-XI slot) ──────────
+
+            _showPlayerContextMenu(player, clientX, clientY) {
+                const menu  = document.getElementById('playerContextMenu');
+                const title = document.getElementById('playerContextMenuTitle');
+                if (!menu || !player) return;
+
+                // Always close any sibling popover first so only one is visible at a time
+                this._hideAllPlayerPopovers();
+
+                title.textContent = `${player.flag ? player.flag + ' ' : ''}${player.name} (${player.position})`;
+
+                menu.querySelectorAll('.context-menu-item').forEach(btn => {
+                    btn.onclick = (e) => {
+                        e.stopPropagation();
+                        const action = btn.dataset.action;
+                        this._hideAllPlayerPopovers();
+                        if (action === 'details')           this.showPlayerDetail(player);
+                        else if (action === 'instructions') this._showInstructionsPopover(player);
+                        else if (action === 'arrow')        this._showArrowPopover(player);
+                    };
+                });
+
+                menu.style.display = 'block';
+                this._positionPopoverAt(menu, clientX + 6, clientY + 6);
+                this._installPopoverDismiss([menu]);
+            }
+
+            // Floating instructions popover, anchored next to the player's slot.
+            _showInstructionsPopover(player) {
+                const menu  = document.getElementById('playerInstructionsMenu');
+                const title = document.getElementById('playerInstructionsMenuTitle');
+                const body  = document.getElementById('playerInstructionsMenuBody');
+                if (!menu || !body || !player) return;
+                this._hideAllPlayerPopovers();
+
+                if (!player.instructions) player.instructions = Team.defaultInstructions(player.position);
+                title.textContent = `⚙ ${player.name} — Instructions`;
+
+                const isFwd = ['ST','CF','CAM','LW','RW'].includes(player.position);
+                const rows = [
+                    { key: 'forwardRuns',  label: 'Forward Runs',  opts: ['rarely','mixed','often'] },
+                    { key: 'runWithBall',  label: 'Run With Ball', opts: ['rarely','mixed','often'] },
+                    { key: 'longShots',    label: 'Long Shots',    opts: ['rarely','mixed','often'] },
+                    { key: 'throughBalls', label: 'Through Balls', opts: ['rarely','mixed','often'] },
+                    { key: 'holdUpBall',   label: 'Hold Up Ball',  opts: ['no','yes'], show: isFwd },
+                    { key: 'freeRole',     label: 'Free Role',     opts: ['no','yes'] },
+                ];
+                body.innerHTML = rows.filter(r => r.show !== false).map(row => `
+                    <div class="tactic-row">
+                        <span class="tactic-label">${row.label}</span>
+                        <div class="tactic-options">
+                            ${row.opts.map(opt => `
+                                <button class="tactic-btn${player.instructions[row.key] === opt ? ' active' : ''}"
+                                        data-inst="${row.key}" data-value="${opt}" type="button">
+                                    ${opt.charAt(0).toUpperCase() + opt.slice(1)}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+
+                body.querySelectorAll('button[data-inst]').forEach(btn => {
+                    btn.onclick = (e) => {
+                        e.stopPropagation();
+                        const key = btn.dataset.inst, value = btn.dataset.value;
+                        this.setPlayerInstruction(player, key, value);
+                        body.querySelectorAll(`button[data-inst="${key}"]`).forEach(b => {
+                            b.classList.toggle('active', b.dataset.value === value);
+                        });
+                    };
+                });
+
+                menu.style.display = 'block';
+                this._positionPopoverNearSlot(menu, player.id);
+                this._installPopoverDismiss([menu]);
+            }
+
+            // Floating arrow-picker popover.
+            _showArrowPopover(player) {
+                const menu  = document.getElementById('playerArrowMenu');
+                const title = document.getElementById('playerArrowMenuTitle');
+                const body  = document.getElementById('playerArrowMenuBody');
+                if (!menu || !body || !player) return;
+                this._hideAllPlayerPopovers();
+
+                if (!player.instructions) player.instructions = Team.defaultInstructions(player.position);
+                title.textContent = `🎯 ${player.name} — Arrow`;
+
+                const layout = [
+                    ['forward-left',  'forward',  'forward-right'],
+                    ['left',          null,       'right'],
+                    ['back-left',     'back',     'back-right'],
+                ];
+                const glyph = {
+                    'forward-left':'↖','forward':'↑','forward-right':'↗',
+                    'left':'←','right':'→',
+                    'back-left':'↙','back':'↓','back-right':'↘',
+                };
+                const current = player.instructions?.arrow || null;
+                body.innerHTML = `<div class="arrow-picker">${
+                    layout.flat().map(dir => `
+                        <button class="arrow-picker-cell${dir === current ? ' active' : ''}${dir === null ? ' clear' : ''}"
+                                data-dir="${dir === null ? '' : dir}" type="button"
+                                title="${dir === null ? 'No arrow' : dir.replace('-', ' ')}">
+                            ${dir === null ? '×' : glyph[dir]}
+                        </button>
+                    `).join('')
+                }</div>`;
+
+                body.querySelectorAll('.arrow-picker-cell').forEach(cell => {
+                    cell.onclick = (e) => {
+                        e.stopPropagation();
+                        const dir = cell.dataset.dir || null;
+                        this._setPlayerArrow(player, dir);
+                        body.querySelectorAll('.arrow-picker-cell').forEach(c => {
+                            c.classList.toggle('active', (c.dataset.dir || null) === dir);
+                        });
+                    };
+                });
+
+                menu.style.display = 'block';
+                this._positionPopoverNearSlot(menu, player.id);
+                this._installPopoverDismiss([menu]);
+            }
+
+            // Position a popover so it sits to the right of the player's slot (fallback: left),
+            // with viewport clamping.
+            _positionPopoverNearSlot(menuEl, playerId) {
+                const slot = document.querySelector(`.fm-player-slot[data-player-id="${playerId}"]`);
+                if (!slot) return this._positionPopoverAt(menuEl, 60, 60);
+                const sRect = slot.getBoundingClientRect();
+                const mRect = menuEl.getBoundingClientRect();
+                const gap = 8;
+                let x = sRect.right + gap;
+                let y = sRect.top;
+                // If it would overflow right, place to the left of the slot
+                if (x + mRect.width > window.innerWidth - 6) x = sRect.left - mRect.width - gap;
+                this._positionPopoverAt(menuEl, x, y);
+            }
+
+            _positionPopoverAt(menuEl, x, y) {
+                const rect = menuEl.getBoundingClientRect();
+                const vw = window.innerWidth, vh = window.innerHeight;
+                if (x + rect.width  > vw - 6) x = vw - rect.width  - 6;
+                if (y + rect.height > vh - 6) y = vh - rect.height - 6;
+                menuEl.style.left = `${Math.max(6, x)}px`;
+                menuEl.style.top  = `${Math.max(6, y)}px`;
+            }
+
+            // Single shared outside-click / Escape dismiss handler. `keepOpen` is the set of
+            // popover elements that should NOT be closed by a click on them.
+            _installPopoverDismiss(keepOpen) {
+                this._removePopoverDismiss();
+                this._popoverOutsideHandler = (ev) => {
+                    if (keepOpen.some(el => el && el.contains(ev.target))) return;
+                    this._hideAllPlayerPopovers();
+                };
+                this._popoverKeyHandler = (ev) => {
+                    if (ev.key === 'Escape') this._hideAllPlayerPopovers();
+                };
+                setTimeout(() => {
+                    document.addEventListener('click', this._popoverOutsideHandler);
+                    document.addEventListener('keydown', this._popoverKeyHandler);
+                }, 0);
+            }
+
+            _removePopoverDismiss() {
+                if (this._popoverOutsideHandler) {
+                    document.removeEventListener('click', this._popoverOutsideHandler);
+                    document.removeEventListener('keydown', this._popoverKeyHandler);
+                    this._popoverOutsideHandler = null;
+                    this._popoverKeyHandler = null;
+                }
+            }
+
+            _hideAllPlayerPopovers() {
+                ['playerContextMenu', 'playerInstructionsMenu', 'playerArrowMenu'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.style.display = 'none';
+                });
+                this._removePopoverDismiss();
+            }
+
+            // Backwards-compat shim: keep the old name working since renderManagementPanel calls it
+            _hidePlayerContextMenu() { this._hideAllPlayerPopovers(); }
+
+            // ─── Drag and drop: substitution and on-pitch position adjustment ────────
+
+            // Attach dragstart/dragover/drop/dragend handlers to a player slot or bench item.
+            _bindSlotDrag(el, source /* 'xi' | 'bench' */) {
+                el.addEventListener('dragstart', (e) => {
+                    const id = parseInt(el.dataset.playerId);
+                    this._dndPayload = { id, source };
+                    el.classList.add('dragging');
+                    if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', String(id));
+                    }
+                });
+                el.addEventListener('dragend', () => {
+                    el.classList.remove('dragging');
+                    document.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+                });
+                // This element is also a drop target — swap when another player is dropped onto it
+                el.addEventListener('dragover', (e) => {
+                    if (!this._dndPayload) return;
+                    e.preventDefault();
+                    el.classList.add('drop-target');
+                });
+                el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+                el.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    el.classList.remove('drop-target');
+                    if (!this._dndPayload) return;
+                    const dstId = parseInt(el.dataset.playerId);
+                    const dst   = source;
+                    this._handleDragDrop(this._dndPayload, { id: dstId, source: dst });
+                    this._dndPayload = null;
+                });
+            }
+
+            // The pitch background itself is a drop zone — drop on empty grass to nudge
+            // a starter's customPos, or to drop a bench player onto an empty area (becomes a sub
+            // requires a target slot, so empty-pitch drops from bench are ignored).
+            _bindPitchDropZone(pitchEl) {
+                pitchEl.addEventListener('dragover', (e) => {
+                    if (!this._dndPayload) return;
+                    e.preventDefault();
+                    pitchEl.classList.add('drop-active');
+                });
+                pitchEl.addEventListener('dragleave', (e) => {
+                    if (e.target === pitchEl) pitchEl.classList.remove('drop-active');
+                });
+                pitchEl.addEventListener('drop', (e) => {
+                    pitchEl.classList.remove('drop-active');
+                    if (!this._dndPayload) return;
+                    // If the drop landed on a slot, the slot's own drop handler took it
+                    if (e.target.closest('.fm-player-slot')) return;
+                    if (this._dndPayload.source !== 'xi') { this._dndPayload = null; return; }
+                    e.preventDefault();
+
+                    // Convert mouse position to pitch % coords and update customPos
+                    const rect = pitchEl.getBoundingClientRect();
+                    const px = Math.max(2, Math.min(98, ((e.clientX - rect.left) / rect.width)  * 100));
+                    const py = Math.max(4, Math.min(96, ((e.clientY - rect.top)  / rect.height) * 100));
+                    this._adjustPlayerCustomPos(this._dndPayload.id, px, py);
+                    this._dndPayload = null;
+                });
+            }
+
+            _bindBenchDropZone(benchEl) {
+                benchEl.addEventListener('dragover', (e) => {
+                    if (!this._dndPayload) return;
+                    if (this._dndPayload.source !== 'xi') return;   // only XI→bench drops accepted on empty area
+                    e.preventDefault();
+                    benchEl.classList.add('drop-active');
+                });
+                benchEl.addEventListener('dragleave', (e) => {
+                    if (e.target === benchEl) benchEl.classList.remove('drop-active');
+                });
+                benchEl.addEventListener('drop', (e) => {
+                    benchEl.classList.remove('drop-active');
+                    if (!this._dndPayload) return;
+                    if (e.target.closest('.player-item')) return;   // a specific bench item handled it
+                    // XI → empty bench area: requires a swap partner, so we just no-op
+                    this._dndPayload = null;
+                });
+            }
+
+            // Dispatch a completed drag/drop to the right action.
+            _handleDragDrop(src, dst) {
+                if (!src || !dst || src.id === dst.id) return;
+
+                // XI ↔ bench: substitute
+                if (src.source !== dst.source) {
+                    const fromXI = src.source === 'xi' ? src : dst;
+                    const toBench = src.source === 'bench' ? src : dst;
+                    const xiPlayer = this.playerTeam.onField.find(p => p.id === fromXI.id);
+                    const bnPlayer = this.playerTeam.bench.find(p => p.id === toBench.id);
+                    if (!xiPlayer || !bnPlayer) return;
+                    this.selectedPlayerOut = xiPlayer;
+                    this.selectedPlayerIn  = bnPlayer;
+                    if (this.isPreMatch || this.rules.canSubstitute('player')) {
+                        this.confirmSubstitution();
+                    } else {
+                        this.selectedPlayerOut = null;
+                        this.selectedPlayerIn  = null;
+                    }
+                    return;
+                }
+
+                // XI → XI: swap slots (their starting positions trade)
+                if (src.source === 'xi' && dst.source === 'xi') {
+                    const a = this.playerTeam.onField.findIndex(p => p.id === src.id);
+                    const b = this.playerTeam.onField.findIndex(p => p.id === dst.id);
+                    if (a === -1 || b === -1) return;
+                    const tmp = this.playerTeam.onField[a];
+                    this.playerTeam.onField[a] = this.playerTeam.onField[b];
+                    this.playerTeam.onField[b] = tmp;
+                    this._refreshMatchFlowPlayerInfo();
+                    this.renderManagementPanel();
+                }
+            }
+
+            // Update a player's customPos (free-form drag-within-pitch).
+            // Clamped to ±15 from the formation default to keep shape recognisable.
+            _adjustPlayerCustomPos(playerId, newX, newY) {
+                const p = this.playerTeam?.onField?.find(pl => pl.id === playerId);
+                if (!p) return;
+                const slot = document.querySelector(`.fm-player-slot[data-player-id="${playerId}"]`);
+                const defX = slot ? parseFloat(slot.dataset.defaultX) : newX;
+                const defY = slot ? parseFloat(slot.dataset.defaultY) : newY;
+                const cx = Math.max(defX - 15, Math.min(defX + 15, newX));
+                const cy = Math.max(defY - 15, Math.min(defY + 15, newY));
+                p.customPos = { x: cx, y: cy };
+                // Keep on-field, bench, roster references in sync (instructions share too)
+                ['onField','bench','players'].forEach(k => {
+                    const ref = this.playerTeam?.[k]?.find(pl => pl.id === playerId);
+                    if (ref && ref !== p) ref.customPos = { x: cx, y: cy };
+                });
+                this.renderFormationPitch();
+            }
+
+            // Set the movement arrow direction on a player and refresh visuals.
+            _setPlayerArrow(player, dir /* string or null */) {
+                if (!player) return;
+                if (!player.instructions) player.instructions = Team.defaultInstructions(player.position);
+                player.instructions.arrow = dir;
+                ['onField','bench','players'].forEach(k => {
+                    const ref = this.playerTeam?.[k]?.find(pl => pl.id === player.id);
+                    if (ref && ref !== player) {
+                        if (!ref.instructions) ref.instructions = Team.defaultInstructions(ref.position);
+                        ref.instructions.arrow = dir;
+                    }
+                });
+                this.renderFormationPitch();
+            }
+
             renderManagementPanel() {
                 const crestEl = document.getElementById('managementCrest');
                 const titleEl = document.getElementById('managementTitle');
@@ -2862,9 +3494,10 @@
                     if (titleEl) titleEl.textContent = this.isPreMatch ? '⚽ PICK YOUR SQUAD ⚽' : this.playerTeam.clubName;
                 }
 
-                // Re-renders implicitly close any open detail overlay (e.g. after a sub)
+                // Re-renders implicitly close any open detail overlay or floating popover.
                 const detailOverlay = document.getElementById('playerDetailOverlay');
                 if (detailOverlay) detailOverlay.style.display = 'none';
+                this._hideAllPlayerPopovers?.();
 
                 // Toggle pre-match vs in-match UI
                 const formSel = document.getElementById('mgmtFormationSelector');
@@ -2891,18 +3524,19 @@
                 // Render formation pitch (left column)
                 this.renderFormationPitch();
 
-                // Render bench / player list (left column)
+                // Render bench / player list (left column).
+                // Bench: click → details (drag is the only path to substitute).
                 const benchList = document.getElementById('benchList');
                 if (benchList) {
                     benchList.innerHTML = '';
                     this.playerTeam.bench.forEach(player => {
                         const playerEl = this.createPlayerElement(player, false);
-                        this._bindClicks(playerEl,
-                            () => this.selectPlayer(player, false),
-                            () => this.showPlayerDetail(player)
-                        );
+                        playerEl.setAttribute('draggable', 'true');
+                        playerEl.addEventListener('click', () => this.showPlayerDetail(player));
+                        this._bindSlotDrag(playerEl, 'bench');
                         benchList.appendChild(playerEl);
                     });
+                    this._bindBenchDropZone(benchList);
                 }
             }
 
@@ -2912,6 +3546,8 @@
                 div.dataset.playerId = player.id;
 
                 const avatarSVG = AvatarGenerator.createSVG(player.avatar, 50, this._jerseyFor(player, this.playerTeam?.jerseyColor));
+                const stamPct   = Math.max(0, Math.min(100, Math.round(player.stamina ?? 100)));
+                const stamCol   = this._staminaColor(stamPct);
 
                 div.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
@@ -2921,6 +3557,9 @@
                         <div class="player-info" style="flex: 1;">
                             <div class="player-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
                             <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span></div>
+                            <div class="stamina-bar" title="Stamina ${stamPct}%">
+                                <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
+                            </div>
                         </div>
                         <div class="player-number" style="color:${this._overallColor(this.calculateOverall(player))};">${this.calculateOverall(player)}</div>
                     </div>
@@ -3001,6 +3640,10 @@
 
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn  = null;
+
+                // Sub changed who's on the pitch → refresh MatchFlow's id→player map so
+                // the new player's instructions drive their movement.
+                this._refreshMatchFlowPlayerInfo();
 
                 if (this.isPreMatch) {
                     this.renderManagementPanel();

@@ -12,6 +12,10 @@ class MatchFlow {
         this._push = { player: 0, cpu: 0 };
         this._ballOwner = null;
 
+        // Per-id player info (position, instructions) — set by the simulator after init().
+        // Used by _pushMult, _driftTick, _wingerTick to apply individual instructions.
+        this._playerInfo = {};
+
         // Attacker movement mode per team.
         // 'hold' → FWDs hover just behind the defensive line (onside).
         // 'run'  → FWDs are making a timed run past the line (off the ball or through ball).
@@ -26,6 +30,11 @@ class MatchFlow {
         playerPositions.forEach((p, i) => this._home.set(i,       { x: p.x, y: p.y }));
         cpuPositions.forEach((p, i)    => this._home.set(100 + i, { x: p.x, y: p.y }));
     }
+
+    // Map from id → player object (with .position and .instructions).
+    // The simulator calls this after init() and re-calls it on substitutions.
+    setPlayerInfo(map) { this._playerInfo = map || {}; }
+    _instruction(id, key) { return this._playerInfo?.[id]?.instructions?.[key]; }
 
     start() {
         this._push      = { player: 0, cpu: 0 };
@@ -166,17 +175,24 @@ class MatchFlow {
     _pushMult(id) {
         const h = this._home.get(id);
         if (!h) return 0;
+        let base;
         if (id < 100) {
-            if (h.x < 15) return 0.04;
-            if (h.x < 35) return 0.50;
-            if (h.x < 60) return 1.00;
-            return 1.30;
+            if      (h.x < 15) base = 0.04;
+            else if (h.x < 35) base = 0.50;
+            else if (h.x < 60) base = 1.00;
+            else               base = 1.30;
         } else {
-            if (h.x > 85) return 0.04;
-            if (h.x > 65) return 0.50;
-            if (h.x > 40) return 1.00;
-            return 1.30;
+            if      (h.x > 85) base = 0.04;
+            else if (h.x > 65) base = 0.50;
+            else if (h.x > 40) base = 1.00;
+            else               base = 1.30;
         }
+        // CM 01/02 forwardRuns instruction: 'often' players push 25 % harder past their home X
+        // when the team is attacking; 'rarely' players hold their ground (×0.65).
+        const fr = this._instruction(id, 'forwardRuns');
+        if (fr === 'often')  base *= 1.25;
+        else if (fr === 'rarely') base *= 0.65;
+        return base;
     }
 
     // Clamp a forward's X so they stay behind the last outfield defender.
@@ -248,9 +264,42 @@ class MatchFlow {
         const push   = this._push[team];
         const offset = push * this._pushMult(id);
         let x = id < 100 ? h.x + offset : h.x - offset;
+        let y = h.y;
+
+        // CM 01/02-style movement arrow: the player effectively takes a new tactical position,
+        // running toward the arrow's destination. This is a strong effect — the player should
+        // visibly spend most of their time near the arrow's target, especially during attacks.
+        // A "forward" arrow on a CM lets them play like an AM; "back" turns a wide-mid into a
+        // wing-back, etc. Player team attacks +x; CPU attacks −x.
+        const arrow = this._instruction(id, 'arrow');
+        if (arrow) {
+            const fwdSign = team === 'player' ? 1 : -1;
+            const LEN = 22, DIAG = 16;
+            const arrowOffsets = {
+                'forward':        { dx:  LEN  * fwdSign, dy:  0    },
+                'back':           { dx: -LEN  * fwdSign, dy:  0    },
+                'left':           { dx:  0,              dy: -LEN  },
+                'right':          { dx:  0,              dy:  LEN  },
+                'forward-left':   { dx:  DIAG * fwdSign, dy: -DIAG },
+                'forward-right':  { dx:  DIAG * fwdSign, dy:  DIAG },
+                'back-left':      { dx: -DIAG * fwdSign, dy: -DIAG },
+                'back-right':     { dx:  DIAG * fwdSign, dy:  DIAG },
+            };
+            const a = arrowOffsets[arrow];
+            if (a) {
+                // Baseline 75 % shift even at rest, full + extra when team is committed forward.
+                // This makes the new role the player's *default* position, not a small nudge.
+                const intensity = push > 0
+                    ? 0.85 + 0.25 * Math.min(1, push / 6)   // 0.85 → 1.10
+                    : 0.55;                                  // even on defence, still leans toward arrow
+                x += a.dx * intensity;
+                y += a.dy * intensity;
+            }
+        }
+
         // In hold mode, FWDs' target position is also bounded by the offside line.
         if (this._fwdMode[team] === 'hold') x = this._onside(id, x);
-        return { x: this._clamp(x), y: h.y };
+        return { x: this._clamp(x), y: this._clamp(y) };
     }
 
     _reshape(team, ms = 650) {
@@ -305,7 +354,11 @@ class MatchFlow {
                     const h      = this._home.get(id);
                     const isFwd  = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
                     const isWide = this._isWide(id);
-                    const yAmp   = isWide ? 15 : 8; // wide players drift further up/down
+                    // freeRole 'yes' → larger amplitudes so the player drifts off-position more.
+                    const free   = this._instruction(id, 'freeRole') === 'yes';
+                    const ampMul = free ? 1.7 : 1.0;
+                    const yAmp   = (isWide ? 15 : 8) * ampMul;
+                    const xAmp   = 10 * ampMul;
                     let nx, ny;
 
                     if (isFwd && this._fwdMode[team] === 'hold') {
@@ -318,9 +371,9 @@ class MatchFlow {
                         } else {
                             nx = this._clamp(this._onside(id, t.x + (Math.random() - 0.5) * 6), lo, hi);
                         }
-                        ny = this._clamp(t.y + (Math.random() - 0.5) * 12);
+                        ny = this._clamp(t.y + (Math.random() - 0.5) * (12 * ampMul));
                     } else {
-                        nx = this._clamp(t.x + (Math.random() - 0.5) * 10, lo, hi);
+                        nx = this._clamp(t.x + (Math.random() - 0.5) * xAmp, lo, hi);
                         ny = this._clamp(t.y + (Math.random() - 0.5) * yAmp);
                     }
                     const ms = 700 + Math.random() * 600;
@@ -366,12 +419,14 @@ class MatchFlow {
                 const h        = this._home.get(id);
                 const isFwd    = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
                 const isWinger = this._isWinger(id);
-                // Attacking wingers earn a wider X clamp so they can push into the opponent's box.
-                const wingerAtkClamp = isWinger && push > 2;
+                const free     = this._instruction(id, 'freeRole') === 'yes';
+                // Attacking wingers — or any free-role wide player — earn a wider X clamp.
+                const wingerAtkClamp = (isWinger && push > 2) || free;
                 const lo = wingerAtkClamp ? (team === 'player' ? 20 :  4) : (team === 'player' ?  4 : 30);
                 const hi = wingerAtkClamp ? (team === 'player' ? 96 : 80) : (team === 'player' ? 70 : 96);
 
-                // Decide movement amplitudes by role + phase
+                // Decide movement amplitudes by role + phase. Free-role players get a ×1.4 boost.
+                const freeMul = free ? 1.4 : 1.0;
                 let yRun, xRun, msBase, msJit;
                 if (isWinger && attacking) {
                     // Wingers in attack: big runs, push high, big lateral coverage
@@ -396,6 +451,10 @@ class MatchFlow {
                     xRun   = (Math.random() - 0.5) * 8;
                     msBase = 500; msJit = 450;
                 }
+
+                // Apply free-role amplitude boost on top of role/phase amplitudes
+                yRun *= freeMul;
+                xRun *= freeMul;
 
                 // Compute targets
                 let nx, ny;
