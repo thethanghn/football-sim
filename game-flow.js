@@ -514,17 +514,27 @@ class MatchFlow {
 
     // ─── Event handlers ───────────────────────────────────────────────────────────
 
-    _evPass({ passer, receiver, team }) {
+    _evPass({ passer, receiver, team, x, y }) {
         if (!team) return;
 
-        let passId = (passer   != null && this._vis(passer))   ? passer   : this._randOf(team);
-        let recvId = (receiver != null && this._vis(receiver)) ? receiver : this._randOf(team);
+        // Prefer players near the event zone (x,y) when picking a passer/receiver if the
+        // simulator didn't pin specific IDs. This keeps the ball visibly inside the zone.
+        const pickByZone = (poolIds) => {
+            if (x == null || y == null) return poolIds[Math.floor(Math.random() * poolIds.length)];
+            let best = poolIds[0], bestD = Infinity;
+            for (const id of poolIds) {
+                const v = this._vis(id);
+                if (!v) continue;
+                const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+                if (d < bestD) { bestD = d; best = id; }
+            }
+            return best;
+        };
+        const teamIds = this._outfield(team);
+        let passId = (passer   != null && this._vis(passer))   ? passer   : pickByZone(teamIds);
+        let recvId = (receiver != null && this._vis(receiver)) ? receiver : pickByZone(teamIds.filter(id => id !== passId));
         if (passId == null || recvId == null) return;
-        if (passId === recvId) {
-            const others = this._outfield(team).filter(id => id !== passId);
-            recvId = others.length ? others[Math.floor(Math.random() * others.length)] : null;
-            if (!recvId) return;
-        }
+        if (passId === recvId) return;
 
         const pv = this._vis(passId);
         const rv = this._vis(recvId);
@@ -582,68 +592,103 @@ class MatchFlow {
         setTimeout(() => this._doKickoff(), 5200);
     }
 
-    _evChance({ team }) {
+    _evChance({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
+        // Pick the attacker nearest to the event zone — they'll be the one taking the shot.
+        const attackers = this._outfield(team);
+        let attId = attackers[0], bestD = Infinity;
+        if (x != null && y != null) {
+            for (const id of attackers) {
+                const v = this._vis(id);
+                if (!v) continue;
+                const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+                if (d < bestD) { bestD = d; attId = id; }
+            }
+        } else {
+            attId = this._randOf(team);
+        }
         if (attId == null) return;
 
-        const goalX = team === 'player' ? 89 : 11;
-        const goalY = 50 + (Math.random() - 0.5) * 24;
+        // Shot origin = the event zone; ball flies a few units toward the actual goal line.
+        const shotX = x ?? (team === 'player' ? 89 : 11);
+        const shotY = y ?? (50 + (Math.random() - 0.5) * 24);
 
-        // All FWDs burst toward goal as the chance develops
         this._triggerRun(team, 1600);
 
         this._ballTo(attId, 240);
         setTimeout(() => {
-            this._move(attId, goalX, goalY, 460);
+            this._move(attId, shotX, shotY, 460);
             setTimeout(() => {
                 this._ballOwner = null;
-                this._animBall(goalX + (team === 'player' ? 7 : -7), goalY, 380, true);
+                this._animBall(shotX + (team === 'player' ? 7 : -7), shotY, 380, true);
             }, 280);
         }, 250);
 
         this._applyPush(team, 5);
     }
 
-    _evMiss({ team }) {
+    _evMiss({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
-        if (attId != null) this._ballTo(attId, 200);
+        // Shooter is the attacker nearest the event zone (so the ball starts there).
+        const attId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
+        if (attId != null) {
+            const v = this._vis(attId);
+            if (v && x != null && y != null) {
+                this._ballOwner = attId;
+                this._animBall(x, y, 200);
+            } else {
+                this._ballTo(attId, 200);
+            }
+        }
 
         setTimeout(() => {
-            const wideY = Math.random() > 0.5
-                ? 50 + 32 + Math.random() * 14
-                : 50 - 32 - Math.random() * 14;
+            const baseY = y ?? 50;
+            const wideY = baseY + (Math.random() > 0.5 ? 1 : -1) * (28 + Math.random() * 12);
             this._ballOwner = null;
             this._animBall(team === 'player' ? 100 : 0, this._clamp(wideY, 0, 100), 410);
         }, 230);
 
-        // Missed — attacking team lost the ball, FWDs retreat onside
         this._snapFwdsOnside(team);
         this._applyPush(team, -3);
     }
 
-    _evBar({ team }) {
+    _evBar({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
+        const attId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
         if (attId != null) this._ballTo(attId, 180);
 
+        const shotX = x ?? (team === 'player' ? 88 : 12);
+        const shotY = y ?? 50;
         setTimeout(() => {
             this._ballOwner = null;
-            this._animBall(team === 'player' ? 100 : 0, 50 + (Math.random()-0.5)*10, 390, true);
+            // Ball strikes the bar near (shotX, shotY) then rebounds back toward midfield/box.
+            this._animBall(team === 'player' ? 100 : 0, shotY + (Math.random()-0.5)*10, 390, true);
         }, 200);
         setTimeout(() => {
             this._animBall(
-                team === 'player' ? 76+Math.random()*13 : 11+Math.random()*13,
-                50 + (Math.random()-0.5)*32, 330);
+                team === 'player' ? shotX - 4 - Math.random()*8 : shotX + 4 + Math.random()*8,
+                shotY + (Math.random()-0.5)*30, 330);
         }, 640);
 
-        // Ball off the bar — possession uncertain, snap FWDs back onside
         this._snapFwdsOnside(team);
         this._applyPush(team, -2);
     }
 
-    _evSave({ team }) {
+    // Find the player on `team` whose pitch position is nearest to (x, y). Returns null if no
+    // coords are given.
+    _pickNearTeamId(team, x, y) {
+        if (x == null || y == null) return null;
+        let best = null, bestD = Infinity;
+        for (const id of this._outfield(team)) {
+            const v = this._vis(id);
+            if (!v) continue;
+            const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+            if (d < bestD) { bestD = d; best = id; }
+        }
+        return best;
+    }
+
+    _evSave({ team, x, y }) {
         if (!team) return;
         const gkId  = team === 'player' ? 0 : 100;
         const homeX = team === 'player' ? 8  : 92;
@@ -652,7 +697,14 @@ class MatchFlow {
         const attTeam = team === 'player' ? 'cpu' : 'player';
 
         this._ballOwner = null;
-        this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true);
+        // If the simulator told us where the shot came from, animate ball from that point
+        // toward the GK so the save visibly originates in the attacking zone.
+        if (x != null && y != null) {
+            this._animBall(x, y, 80);
+            setTimeout(() => this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true), 90);
+        } else {
+            this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true);
+        }
 
         if (gkV) {
             this.anim.animateMove(gkId, gkV.pitchX, gkV.pitchY,
@@ -676,12 +728,14 @@ class MatchFlow {
         }, 460);
     }
 
-    _evTackle({ team }) {
+    _evTackle({ team, x, y }) {
         if (!team) return;
         const opp   = team === 'player' ? 'cpu' : 'player';
-        const defId = this._randOf(team);
+        // Pick players nearest to the event zone so the tackle visibly happens there.
+        const defId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
         const attId = (this._ballOwner != null && this._outfield(opp).includes(this._ballOwner))
-                      ? this._ballOwner : this._randOf(opp);
+                      ? this._ballOwner
+                      : (this._pickNearTeamId(opp, x, y) ?? this._randOf(opp));
         if (defId == null || attId == null) return;
 
         const dv = this._vis(defId);
@@ -962,22 +1016,24 @@ class MatchFlow {
     // ─── Offside ──────────────────────────────────────────────────────────────────
     // Assistant raises flag. Play stops. Ball handed to defending team.
 
-    _evOffside({ team }) {
+    _evOffside({ team, x, y }) {
         if (!team) return;
         const defTeam = team === 'player' ? 'cpu' : 'player';
 
-        // Ball snaps to the offside line (where flag is raised)
+        // Ball snaps to the offside line (where flag is raised). Prefer the engine zone's
+        // Y if provided so the flag falls on the same lane the attack was building down.
         const line = this.getOffsideLine(team);
-        const flagX = line != null ? line : (team === 'player' ? 75 : 25);
+        const flagX = line != null ? line : (x != null ? x : (team === 'player' ? 75 : 25));
+        const flagY = y != null ? y : 50 + (Math.random()-0.5)*28;
         this._ballOwner = null;
-        this._animBall(flagX, 50 + (Math.random()-0.5)*28, 350);
+        this._animBall(flagX, flagY, 350);
 
         // Attackers must retreat behind the ball — drop shape back
         this._applyPush(team, -5);
 
-        // Defending team takes the indirect free kick
+        // Defending team takes the indirect free kick — prefer a defender near the flag
         setTimeout(() => {
-            const recvId = this._randOf(defTeam);
+            const recvId = this._pickNearTeamId(defTeam, flagX, flagY) ?? this._randOf(defTeam);
             if (recvId != null) {
                 this._ballTo(recvId, 380);
                 this._applyPush(defTeam, 2);
@@ -985,11 +1041,14 @@ class MatchFlow {
         }, 900);
     }
 
-    _evPossession({ team } = {}) {
+    _evPossession({ team, x, y } = {}) {
         if (!team) return;
-        const pid = this._randOf(team);
-        if (pid) {
-            this._ballTo(pid, 380);
+        // Prefer a player near the zone where possession was won so the ball animates into
+        // that area — gives a believable "kick-off / restart from this zone" feel.
+        const pid = (x != null && y != null) ? this._pickNearTeamId(team, x, y) : null;
+        const id = pid ?? this._randOf(team);
+        if (id) {
+            this._ballTo(id, 380);
             this._applyPush(team, 2);
         }
     }

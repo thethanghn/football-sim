@@ -1127,11 +1127,15 @@
                 this.substitutions = [];
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral'; // kept for legacy compat
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', longShots: 'mixed' };
                 this.momentum = 50; // 0=CPU dominates, 100=player dominates
                 this._attackPhase = null; // null | 'buildup' | 'progression' | 'danger'
                 this._attackTeam  = null; // 'player' | 'cpu'
                 this._phaseTicks  = 0;
+                // Where on the pitch the current ball action is — 5 bands × 3 lanes (matches debug grid).
+                // Updated by every phase tick and every event so the visual layer can place the ball.
+                this._attackBand  = 2;    // 0…4 (left-to-right on screen, 0 = player goal end, 4 = CPU goal end)
+                this._attackLane  = 1;    // 0…2 (top to bottom)
                 this.matchSpeed   = 'fast';   // 'slow' | 'normal' | 'fast' — 'fast' preserves legacy 500ms/1000ms pace
                 this._cpuLastFormationChangeMinute = 0;  // CPU AI cooldown tracker
                 this.debugMode    = false;   // toggled by triple-clicking the match clock
@@ -1837,6 +1841,64 @@
                 return ZoneStrength.formationBonus(formation);
             }
 
+            // ─── Attack-zone helpers ──────────────────────────────────────────────────
+            // The pitch is divided into 5 bands × 3 lanes (the debug-grid). Every event that
+            // involves the ball or a player carries its zone, and the rendering layer places
+            // the ball at the matching pitch coordinates.
+
+            static BANDS = 5;
+            static LANES = 3;
+
+            // (band, lane) → pitch-percent (x, y). Optional jitter shakes the result within the cell.
+            _zoneToCoords(band, lane, jitter = 0) {
+                const bandSize = 100 / FootballSimulator.BANDS;
+                const laneSize = 100 / FootballSimulator.LANES;
+                const x = (band + 0.5) * bandSize + (Math.random() - 0.5) * jitter;
+                const y = (lane + 0.5) * laneSize + (Math.random() - 0.5) * jitter;
+                return { x: Math.max(2, Math.min(98, x)), y: Math.max(2, Math.min(98, y)) };
+            }
+
+            // Current attack zone as pitch coordinates (with light jitter).
+            _eventCoords(jitter = 8) {
+                return this._zoneToCoords(this._attackBand, this._attackLane, jitter);
+            }
+
+            // Set the attack zone explicitly.
+            _setZone(band, lane) {
+                this._attackBand = Math.max(0, Math.min(FootballSimulator.BANDS - 1, band));
+                this._attackLane = Math.max(0, Math.min(FootballSimulator.LANES - 1, lane));
+            }
+
+            // Move the ball "forward" by `steps` bands in the attacking team's direction.
+            _advanceZone(steps = 1) {
+                const dir = this._attackTeam === 'player' ? 1 : -1;
+                this._setZone(this._attackBand + dir * steps, this._attackLane);
+            }
+
+            // Pick a fresh lane (with a slight centre-bias) — called when a new possession starts.
+            _resetLane() {
+                const r = Math.random();
+                this._attackLane = r < 0.45 ? 1 : r < 0.725 ? 0 : 2;   // 45 % centre, 27.5 % wings each
+            }
+
+            // Build the payload appended to every onEvent call so matchFlow can place the ball.
+            _eventPayload(extra = {}) {
+                const { x, y } = this._eventCoords(extra.jitter ?? 8);
+                return { x, y, band: this._attackBand, lane: this._attackLane, ...extra };
+            }
+
+            // Single relay to matchFlow.onEvent: automatically annotates the payload with the
+            // current zone coords unless the caller already supplied x/y (e.g. corner, freekick,
+            // throw-in have their own fixed coords).
+            _emitMatchEvent(type, payload = {}) {
+                if (!this.matchFlow) return;
+                const hasCoords = payload.x != null && payload.y != null;
+                const final = hasCoords
+                    ? { ...payload, band: this._attackBand, lane: this._attackLane }
+                    : { ...this._eventPayload(payload), ...payload, ...this._eventCoords(8) };
+                this.matchFlow.onEvent(type, final);
+            }
+
             generateEvent() {
                 // Rare: late-game special events interrupt any phase
                 if (this.timeRemaining < 35 && Math.random() < 0.03) {
@@ -1891,11 +1953,16 @@
                     return; // Phase stays null; next tick re-battles
                 }
 
-                // Visual: show the ball changing hands
-                if (this.matchFlow) this.matchFlow.onEvent('possession', { team: possession });
-
                 this._attackTeam = possession;
                 this._phaseTicks = 0;
+
+                // Possession resets to the attacking team's own half. Lane is freshly chosen
+                // with a centre-bias.
+                this._setZone(possession === 'player' ? 1 : 3, this._attackLane);
+                this._resetLane();
+
+                // Visual: show the ball changing hands, now anchored to the new zone
+                this._emitMatchEvent('possession', this._eventPayload({ team: possession, jitter: 14 }));
 
                 // Gung-ho / direct teams launch immediately, skipping patient buildup
                 const skipChance = possession === 'player'
@@ -1904,6 +1971,7 @@
                     : 0;
 
                 this._attackPhase = Math.random() < skipChance ? 'progression' : 'buildup';
+                if (this._attackPhase === 'progression') this._advanceZone(1);
             }
 
             // ── Buildup phase: working ball out from defense / own half ───────────────
@@ -1951,8 +2019,11 @@
                     this.passEvent(team);        // final ball over the top / into midfield
                     this._attackPhase = 'progression';
                     this._phaseTicks  = 0;
+                    this._advanceZone(1);         // shift one band forward
                 } else {
                     this.passEvent(team);        // safe pass, staying in own half
+                    // Occasional small lane shift to keep things visually varied
+                    if (Math.random() < 0.25) this._attackLane = (this._attackLane + (Math.random() < 0.5 ? -1 : 1) + 3) % 3;
                 }
             }
 
@@ -1995,12 +2066,16 @@
                 }
 
                 // Speculative long shot from outside the box — ends the attack.
-                // Probability scales with how many onfield mids have longShots: often.
+                // Probability scales with how many onfield mids have longShots: often,
+                // then multiplied by the team-level Long Shots tactic.
                 const teamObjLS = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const oftenShooters = teamObjLS?.onField?.filter(p =>
                     ['CM','CAM','CDM','LM','RM'].includes(p.position) && p.instructions?.longShots === 'often'
                 ).length || 0;
-                const lsProb = Math.min(0.20, 0.06 + oftenShooters * 0.035);
+                const teamLSMult = team === 'player'
+                    ? ({ 'often': 1.6, 'mixed': 1.0, 'rarely': 0.35 }[this.tactics.longShots] || 1.0)
+                    : 1.0;   // CPU uses its own default until a CPU tactics layer exists
+                const lsProb = Math.min(0.30, (0.06 + oftenShooters * 0.035) * teamLSMult);
                 if (Math.random() < lsProb) {
                     this.longShotEvent(team);
                     this._attackPhase = null;
@@ -2043,12 +2118,18 @@
                         ['CAM','CM','LW','RW'].includes(p.position) && p.instructions?.throughBalls === 'often'
                     ).length || 0;
                     const tbProb = Math.min(0.55, 0.18 + oftenPassers * 0.10);
+                    // Ball travels into the danger zone (final third)
+                    this._setZone(team === 'player' ? 4 : 0, this._attackLane);
                     if (Math.random() < tbProb) this.throughBallEvent(team);
                     else                        this.passEvent(team);
                     this._attackPhase = 'danger';
                     this._phaseTicks  = 0;
                 } else {
                     this.passEvent(team);        // patient build-up in the final third
+                    // 25 % chance to advance one more band — keeps the attack moving forward
+                    if (Math.random() < 0.25) this._advanceZone(1);
+                    // Or a small lateral shift to widen / cut inside
+                    else if (Math.random() < 0.30) this._attackLane = (this._attackLane + (Math.random() < 0.5 ? -1 : 1) + 3) % 3;
                 }
             }
 
@@ -2056,6 +2137,10 @@
             _doDanger() {
                 const team = this._attackTeam;
                 const opp  = team === 'player' ? 'cpu' : 'player';
+
+                // Lock the zone to the attacking team's final third for this whole resolution.
+                // Subsequent events (goal / save / chance / etc.) inherit this zone.
+                this._setZone(team === 'player' ? 4 : 0, this._attackLane);
 
                 // Reset state first so any re-entrant call (goalEvent → missedChanceEvent) is clean
                 this._attackPhase = null;
@@ -2166,7 +2251,7 @@
                 const assistText = assist ? ` (assist: <b class="ev-name">${assist.name}</b>)` : '';
                 this.addEvent(`⚽ GOAL (${minute}')! <b class="ev-name">${scorer.name}</b> scores!${assistText}`, 'goal', team);
 
-                if (this.matchFlow) this.matchFlow.onEvent('goal', { scorer: scorerId, team });
+                this._emitMatchEvent('goal', { scorer: scorerId, team });
                 this.showCelebration(scorer, team);
             }
 
@@ -2202,7 +2287,7 @@
                     this.momentum = Math.max(0, this.momentum - 4);
                 }
                 this.addEvent(`🎯 ${quality} chance for <b class="ev-name">${player.name}</b>!`, 'chance', team);
-                if (this.matchFlow) this.matchFlow.onEvent('chance', { team });
+                this._emitMatchEvent('chance', { team });
             }
 
             tackleEvent(team) {
@@ -2234,7 +2319,7 @@
                             ? 30 + Math.random() * 40
                             : 30 + Math.random() * 40;
                         const foulY = 25 + Math.random() * 50;
-                        if (this.matchFlow) this.matchFlow.onEvent('freekick', { team: attTeam, x: foulX, y: foulY });
+                        this._emitMatchEvent('freekick', { team: attTeam, x: foulX, y: foulY });
                         if (Math.random() < 0.20) this.cardEvent(team); // possible booking
                     } else {
                         this.addEvent(`🛡️ <b class="ev-name">${defender.name}</b> misses the tackle!`, 'tackle', team);
@@ -2251,7 +2336,7 @@
                     this.momentum = Math.max(0, this.momentum - 3);
                     this.addEvent(`🛡️ <b class="ev-name">${defender.name}</b> dispossesses the attacker!`, 'tackle', team);
                 }
-                if (this.matchFlow) this.matchFlow.onEvent('tackle', { team });
+                this._emitMatchEvent('tackle', { team });
 
                 // Stamina drain from tackle (determination softens it)
                 const detMod = (defender.determination || 70) / 100;
@@ -2297,7 +2382,7 @@
                             `🚩 OFFSIDE (${minute}') — <b class="ev-name">${receiver.name}</b> is flagged!`,
                             'tackle', team === 'player' ? 'cpu' : 'player'
                         );
-                        this.matchFlow.onEvent('offside', { team }); // team = the offside attacker's team
+                        this._emitMatchEvent('offside', { team }); // team = the offside attacker's team
                         this.momentum = team === 'player'
                             ? Math.max(0,   this.momentum - 4)
                             : Math.min(100, this.momentum + 4);
@@ -2315,11 +2400,11 @@
                 if (team === 'player') {
                     this.stats.playerPasses++;
                     this.addEvent(`⚪ <b class="ev-name">${passer.name}</b> — ${passDesc} to <b class="ev-name">${receiver.name}</b>`, 'pass', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('pass', { passer: passerId, receiver: receiverId, team });
+                    this._emitMatchEvent('pass', { passer: passerId, receiver: receiverId, team });
                 } else {
                     this.stats.cpuPasses++;
                     this.addEvent(`⚪ <b class="ev-name">${passer.name}</b> threads a ${passDesc} to <b class="ev-name">${receiver.name}</b>`, 'pass', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('pass', { passer: passerId + baseId, receiver: receiverId + baseId, team });
+                    this._emitMatchEvent('pass', { passer: passerId + baseId, receiver: receiverId + baseId, team });
                 }
                 this.updatePossession();
             }
@@ -2340,7 +2425,7 @@
                 } else {
                     this.addEvent(`🧤 Great save!`, 'save', team);
                 }
-                if (this.matchFlow) this.matchFlow.onEvent('save', { team });
+                this._emitMatchEvent('save', { team });
             }
 
             substitutionEvent() {
@@ -2365,7 +2450,7 @@
                 this.stats.playerPossession = Math.max(30, Math.min(70, this.stats.playerPossession + change));
                 this.updatePossession();
                 const team = change > 0 ? 'player' : 'cpu';
-                if (this.matchFlow) this.matchFlow.onEvent('possession', { team });
+                this._emitMatchEvent('possession', { team });
             }
 
             missedChanceEvent(team) {
@@ -2388,7 +2473,7 @@
                     this.momentum = Math.min(100, this.momentum + 2);
                 }
                 this.addEvent(`❌ <b class="ev-name">${player.name}</b> ${missDesc}`, 'chance', team);
-                if (this.matchFlow) this.matchFlow.onEvent('miss', { team });
+                this._emitMatchEvent('miss', { team });
             }
 
             barEvent(team) {
@@ -2402,14 +2487,14 @@
                     this.stats.cpuShots++;
                     this.addEvent(`🔴 <b class="ev-name">${player.name}</b> strikes the bar!`, 'save', team);
                 }
-                if (this.matchFlow) this.matchFlow.onEvent('bar', { team });
+                this._emitMatchEvent('bar', { team });
             }
 
             cornerEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const player = teamObj.getRandomPlayer(true);
                 this.addEvent(`🚩 Corner kick! <b class="ev-name">${player.name}</b> delivers into the box`, 'pass', team);
-                if (this.matchFlow) this.matchFlow.onEvent('corner', { team });
+                this._emitMatchEvent('corner', { team });
             }
 
             throwInEvent(team) {
@@ -2419,7 +2504,7 @@
                 const sideY  = Math.random() > 0.5 ? 2 : 98;
                 const throwX = 18 + Math.random() * 64;
                 this.addEvent(`🤾 Throw-in by <b class="ev-name">${player.name}</b>`, 'pass', team);
-                if (this.matchFlow) this.matchFlow.onEvent('throwin', { team, sideY, throwX });
+                this._emitMatchEvent('throwin', { team, sideY, throwX });
             }
 
             cardEvent(team) {
@@ -2543,11 +2628,11 @@
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
                     this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> coolly slots home the penalty!`, 'goal', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this._emitMatchEvent('goal', { team });
                     this.showCelebration(taker, team);
                 } else if (r < goalP + (1 - goalP) * 0.55 && gk) {
                     this.addEvent(`🧤 SAVED! <b class="ev-name">${gk.name}</b> dives to push the penalty away!`, 'save', team === 'player' ? 'cpu' : 'player');
-                    if (this.matchFlow) this.matchFlow.onEvent('save', { team: team === 'player' ? 'cpu' : 'player' });
+                    this._emitMatchEvent('save', { team: team === 'player' ? 'cpu' : 'player' });
                 } else {
                     this.addEvent(`❌ <b class="ev-name">${taker.name}</b> blazes the penalty over the bar!`, 'chance', team);
                 }
@@ -2577,7 +2662,7 @@
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 12); }
                     this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> curls a stunning free kick into the top corner!`, 'goal', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this._emitMatchEvent('goal', { team });
                     this.showCelebration(taker, team);
                 } else if (r < 0.32) {
                     this.addEvent(`🧱 The wall blocks <b class="ev-name">${taker.name}</b>'s effort!`, 'save', team);
@@ -2623,7 +2708,7 @@
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 10); }
                     this.goals.push({ team, scorer: shooter.name, assister: null, time: `${minute}'` });
                     this.addEvent(`⚽ SCREAMER! <b class="ev-name">${shooter.name}</b> lets fly from 25 yards — top bins!`, 'goal', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this._emitMatchEvent('goal', { team });
                     this.showCelebration(shooter, team);
                 } else if (r < 0.55) {
                     this.addEvent(`🧤 <b class="ev-name">${shooter.name}</b>'s long-range effort is gathered by <b class="ev-name">${gk?.name || 'the keeper'}</b>`, 'save', team === 'player' ? 'cpu' : 'player');
@@ -2668,7 +2753,7 @@
                 const runners  = teamObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position) && p.id !== passer.id);
                 const receiver = runners.length ? runners[Math.floor(Math.random() * runners.length)] : teamObj.getRandomPlayer(true);
                 this.addEvent(`✨ <b class="ev-name">${passer.name}</b> slides a perfect through ball to <b class="ev-name">${receiver.name}</b>!`, 'pass', team);
-                if (this.matchFlow) this.matchFlow.onEvent('pass', { team });
+                this._emitMatchEvent('pass', { team });
             }
 
             dribbleEvent(team) {
@@ -2722,7 +2807,7 @@
                 else                       { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
                 this.goals.push({ team: benefits, scorer: `${culprit.name} (OG)`, assister: null, time: `${minute}'` });
                 this.addEvent(`😱 OWN GOAL (${minute}')! <b class="ev-name">${culprit.name}</b> turns the ball into his own net!`, 'goal', benefits);
-                if (this.matchFlow) this.matchFlow.onEvent('goal', { team: benefits });
+                this._emitMatchEvent('goal', { team: benefits });
             }
 
             goalDisallowedEvent(team) {
@@ -2730,7 +2815,7 @@
                 const scorer = teamObj.getRandomPlayer(true);
                 const reason = Math.random() < 0.6 ? 'offside' : 'foul in the build-up';
                 this.addEvent(`🚫 GOAL DISALLOWED — <b class="ev-name">${scorer.name}</b>'s effort ruled out for ${reason}!`, 'card', team);
-                if (this.matchFlow) this.matchFlow.onEvent('offside', { team });
+                this._emitMatchEvent('offside', { team });
             }
 
             spectacularEvent(team) {
@@ -2751,7 +2836,7 @@
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 16); }
                     this.goals.push({ team, scorer: acrobat.name, assister: null, time: `${minute}'` });
                     this.addEvent(`🤸 WONDER GOAL — <b class="ev-name">${acrobat.name}</b> with an outrageous ${move}!`, 'goal', team);
-                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this._emitMatchEvent('goal', { team });
                     this.showCelebration(acrobat, team);
                 } else {
                     this.addEvent(`🤸 <b class="ev-name">${acrobat.name}</b> attempts an audacious ${move} — ${gk?.name || 'the keeper'} watches it sail wide!`, 'chance', team);
@@ -2772,7 +2857,7 @@
                 const fwds    = attObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position));
                 const caught  = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : attObj.getRandomPlayer(true);
                 this.addEvent(`🚩 Offside! <b class="ev-name">${caught.name}</b> is caught the wrong side of the last defender`, 'pass', attTeam);
-                if (this.matchFlow) this.matchFlow.onEvent('offside', { team: attTeam });
+                this._emitMatchEvent('offside', { team: attTeam });
             }
 
             goalmouthScrambleEvent(team) {
@@ -3899,7 +3984,7 @@
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral';
                 this._cpuLastFormationChangeMinute = 0;
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', longShots: 'mixed' };
                 this.momentum = 50;
                 this._attackPhase = null;
                 this._attackTeam  = null;
