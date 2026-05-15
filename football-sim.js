@@ -907,6 +907,10 @@
                         avatar: AvatarGenerator.generateAvatar(i, this.jerseyColor),
                         instructions: Team.defaultInstructions(position),
                         morale: Team.randomMorale(),
+                        // Per-match performance counters (live with the player; the spread used by
+                        // setupSquad / subs keeps the same `stats` reference, so writes from any
+                        // reference update the same object).
+                        stats: { dribbles: 0, passes: 0, shots: 0, duelsWon: 0, minutesPlayed: 0, subbedOnMinute: null },
                         ...attributes
                     });
                 }
@@ -934,6 +938,7 @@
                         age: 25, height: 178,
                         naturalPosition: 'ST',
                         secondaryPositions: ['CF', 'CAM'],   // can drop into the hole
+                        stats: { dribbles: 0, passes: 0, shots: 0, duelsWon: 0, minutesPlayed: 0, subbedOnMinute: null },
                     };
                 }
 
@@ -1385,6 +1390,61 @@
                 return '#22C55E';
             }
 
+            // ─── Per-player match performance stats ──────────────────────────────────
+            // Tracks dribbles, passes, shots, duels won, and minutes played per player so the
+            // post-match result screen can show individual performance.
+
+            // Reset per-player stats and mark every starter as on-field from minute 0.
+            // Stats live on the player object directly (see generatePlayers), so each team's
+            // players have their own independent stats — no shared map / ID collisions.
+            _initPlayerStats() {
+                const reset = p => {
+                    p.stats = p.stats || {};
+                    p.stats.dribbles = 0;
+                    p.stats.passes = 0;
+                    p.stats.shots = 0;
+                    p.stats.duelsWon = 0;
+                    p.stats.minutesPlayed = 0;
+                    p.stats.subbedOnMinute = null;
+                };
+                this.playerTeam?.players?.forEach(reset);
+                this.cpuTeam?.players?.forEach(reset);
+                // Starters get subbedOnMinute = 0 so finalize captures the full 90 if they stay on.
+                this.playerTeam?.onField?.forEach(p => { if (p.stats) p.stats.subbedOnMinute = 0; });
+                this.cpuTeam?.onField?.forEach   (p => { if (p.stats) p.stats.subbedOnMinute = 0; });
+            }
+
+            _addStat(player, key, n = 1) {
+                if (!player?.stats) return;
+                player.stats[key] = (player.stats[key] || 0) + n;
+            }
+
+            _statSubOn(player) {
+                if (!player?.stats) return;
+                player.stats.subbedOnMinute = this.rules.getMatchMinute(this.timeRemaining);
+            }
+
+            _statSubOff(player) {
+                if (!player?.stats) return;
+                if (player.stats.subbedOnMinute != null) {
+                    player.stats.minutesPlayed += this.rules.getMatchMinute(this.timeRemaining) - player.stats.subbedOnMinute;
+                    player.stats.subbedOnMinute = null;
+                }
+            }
+
+            // Close out minutes for anyone still on the field — called at endMatch.
+            _finalizePlayerStats() {
+                const endMin = this.rules.getMatchMinute(this.timeRemaining);
+                [this.playerTeam, this.cpuTeam].forEach(t => {
+                    t?.onField?.forEach(p => {
+                        if (p.stats && p.stats.subbedOnMinute != null) {
+                            p.stats.minutesPlayed += endMin - p.stats.subbedOnMinute;
+                            p.stats.subbedOnMinute = null;
+                        }
+                    });
+                });
+            }
+
             // CM 03/04: per-player Mentality / Tackling / Passing override the team setting.
             // 'default' on the player means "follow team". Returns the effective value.
             _playerTactic(player, key) {
@@ -1816,6 +1876,7 @@
                     this.setupPitchPlayers();
                     console.log('Pitch players set up');
 
+                    this._initPlayerStats();   // reset per-player performance counters
                     this.isRunning = true;
                     console.log('Starting match...');
                     this.runMatch();
@@ -2468,6 +2529,7 @@
                     this.momentum = Math.max(0, this.momentum - 15);
                 }
                 const assistText = assist ? ` (assist: <b class="ev-name">${assist.name}</b>)` : '';
+                this._addStat(scorer, 'shots');
                 this.addEvent(`⚽ GOAL (${minute}')! <b class="ev-name">${scorer.name}</b> scores!${assistText}`, 'goal', team);
 
                 this._emitMatchEvent('goal', { scorer: scorerId, team });
@@ -2505,6 +2567,7 @@
                     this.stats.cpuShots++;
                     this.momentum = Math.max(0, this.momentum - 4);
                 }
+                this._addStat(player, 'shots');
                 this.addEvent(`🎯 ${quality} chance for <b class="ev-name">${player.name}</b>!`, 'chance', team);
                 this._emitMatchEvent('chance', { team });
             }
@@ -2536,7 +2599,7 @@
                     // player tackling style sets foul rate; CPU always uses base 40%
                     const effectiveFoulRate = team === 'player' ? foulRate : 0.40;
                     if (Math.random() < effectiveFoulRate) {
-                        this.addEvent(`🟡 Foul by <b class="ev-name">${defender.name}</b> (${minute}')! Free kick awarded.`, 'tackle', team);
+                        this.addEvent(`🟡 Foul by <b class="ev-name">${defender.name}</b> (${minute}')! Free kick awarded.`, 'tackle', team, 'medium');
 
                         // A foul in the attacker's attacking third is a "dangerous" free kick —
                         // run the full simulator-side resolution (taker stands over it, goal /
@@ -2563,6 +2626,7 @@
                     return;
                 }
 
+                this._addStat(defender, 'duelsWon');
                 if (team === 'player') {
                     this.stats.playerTackles++;
                     this.momentum = Math.min(100, this.momentum + 3);
@@ -2635,6 +2699,7 @@
                                  : (vision > 80 ? 'incisive ball' : vision > 65 ? 'good pass' : 'short pass');
                 const passDesc = styleLabel;
 
+                this._addStat(passer, 'passes');
                 if (team === 'player') {
                     this.stats.playerPasses++;
                     this.addEvent(`⚪ <b class="ev-name">${passer.name}</b> — ${passDesc} to <b class="ev-name">${receiver.name}</b>`, 'pass', team);
@@ -2678,8 +2743,11 @@
                     this.substitutions.push({ team, playerOut: sub.playerOut.name, playerIn: sub.playerIn.name, time: `${minute}'` });
                     this.addEvent(
                         `🔄 Sub (${minute}'): <b class="ev-name">${sub.playerOut.name}</b> off, <b class="ev-name">${sub.playerIn.name}</b> on!`,
-                        'tackle', team
+                        'tackle', team, 'medium'
                     );
+                    // Track minutes played for both sides of the swap (CPU subs too).
+                    this._statSubOff(sub.playerOut);
+                    this._statSubOn(sub.playerIn);
                 }
             }
 
@@ -2731,7 +2799,7 @@
             cornerEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const player = teamObj.getRandomPlayer(true);
-                this.addEvent(`🚩 Corner kick! <b class="ev-name">${player.name}</b> delivers into the box`, 'pass', team);
+                this.addEvent(`🚩 Corner kick! <b class="ev-name">${player.name}</b> delivers into the box`, 'pass', team, 'medium');
                 this._emitMatchEvent('corner', { team });
             }
 
@@ -2741,7 +2809,7 @@
                 // Pick a realistic throw-in location along the touchline
                 const sideY  = Math.random() > 0.5 ? 2 : 98;
                 const throwX = 18 + Math.random() * 64;
-                this.addEvent(`🤾 Throw-in by <b class="ev-name">${player.name}</b>`, 'pass', team);
+                this.addEvent(`🤾 Throw-in by <b class="ev-name">${player.name}</b>`, 'pass', team, 'medium');
                 this._emitMatchEvent('throwin', { team, sideY, throwX });
             }
 
@@ -2773,7 +2841,7 @@
                     this.cardData[team].push({ player: player.name, type: 'red',    time: minute });
                     this.addEvent(
                         `🟡🔴 SECOND YELLOW (${minute}') — <b class="ev-name">${player.name}</b> is sent off!`,
-                        'card', team
+                        'card', team, 'critical'
                     );
                     this.rules.removeFromField(teamObj, player);
                     if (player.position === 'GK') {
@@ -2786,7 +2854,7 @@
                     this.cardData[team].push({ player: player.name, type: 'red', time: minute });
                     this.addEvent(
                         `🔴 RED CARD (${minute}') — <b class="ev-name">${player.name}</b> is sent off!`,
-                        'card', team
+                        'card', team, 'critical'
                     );
                     this.rules.removeFromField(teamObj, player);
                     if (player.position === 'GK') {
@@ -2826,11 +2894,14 @@
                     teamObj.bench.push(injuredPlayer);
                     // Replacement assumes the slot's expected position (efficiency penalty if mismatched)
                     teamObj.assignSlotPositions(team === 'player' ? this.playerFormation : this.cpuFormation);
+                    // Track minutes played
+                    this._statSubOff(injuredPlayer);
+                    this._statSubOn(replacement);
                     this.rules.recordSub(team);
                     this.substitutions.push({ team, playerOut: injuredPlayer.name, playerIn: replacement.name, time: `${minute}'` });
                     this.addEvent(
                         `🚑 <b class="ev-name">${injuredPlayer.name}</b> stretchered off (${minute}')! <b class="ev-name">${replacement.name}</b> comes on`,
-                        'injury', team
+                        'injury', team, 'critical'
                     );
                 } else if (teamObj.bench.length === 0) {
                     this.addEvent(`🚑 <b class="ev-name">${injuredPlayer.name}</b> is seriously injured — no substitutes left! Playing on reduced.`, 'injury', team);
@@ -2864,6 +2935,7 @@
                 const r = Math.random();
 
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+                this._addStat(taker, 'shots');
 
                 if (r < goalP) {
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 18); }
@@ -2891,13 +2963,14 @@
                 )[0] || teamObj.getRandomPlayer(true);
 
                 const gk = defTeamObj.onField.find(p => p.position === 'GK');
-                this.addEvent(`📐 Dangerous free kick — <b class="ev-name">${taker.name}</b> stands over it...`, 'pass', team);
+                this.addEvent(`📐 Dangerous free kick — <b class="ev-name">${taker.name}</b> stands over it...`, 'pass', team, 'medium');
                 // Trigger the visual setup (wall + taker + runners) on the pitch.
                 this._emitMatchEvent('freekick', { team });
 
                 const skill = ((taker.finishing || 60) + (taker.crossing || 60)) / 2 / 100;
                 const r = Math.random();
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+                this._addStat(taker, 'shots');
 
                 if (r < skill * 0.18) {
                     // Direct free kick goal
@@ -2943,6 +3016,7 @@
                 const gk = defTeamObj.onField.find(p => p.position === 'GK');
 
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+                this._addStat(shooter, 'shots');
 
                 const skill = ((shooter.finishing || 55) + (shooter.composure || 60)) / 200;
                 const r = Math.random();
@@ -2969,6 +3043,7 @@
                 if (attacking) {
                     const tall = teamObj.onField.filter(p => ['ST','CF','CB','CAM'].includes(p.position));
                     const headerer = tall.length ? tall[Math.floor(Math.random() * tall.length)] : teamObj.getRandomPlayer(true);
+                    this._addStat(headerer, 'shots');
                     const r = Math.random();
                     const head = (headerer.heading || 60) / 100;
                     if (r < head * 0.25) {
@@ -2981,6 +3056,7 @@
                 } else {
                     const cbs = teamObj.onField.filter(p => ['CB','CDM'].includes(p.position));
                     const clearer = cbs.length ? cbs[Math.floor(Math.random() * cbs.length)] : teamObj.getRandomPlayer(true);
+                    this._addStat(clearer, 'duelsWon');
                     this.addEvent(`🛡️ <b class="ev-name">${clearer.name}</b> wins the aerial duel and clears!`, 'tackle', team);
                 }
             }
@@ -3011,6 +3087,7 @@
                     : teamObj.getRandomPlayer(true);
                 const drib = (dribbler.dribbling || 60) / 100;
                 if (Math.random() < drib * 0.7) {
+                    this._addStat(dribbler, 'dribbles');
                     this.addEvent(`🏃 <b class="ev-name">${dribbler.name}</b> dances past two defenders!`, 'pass', team);
                 } else {
                     this.addEvent(`🛡️ <b class="ev-name">${dribbler.name}</b> tries to take on the defence but loses it`, 'tackle', team === 'player' ? 'cpu' : 'player');
@@ -3026,6 +3103,7 @@
 
                 this.addEvent(`🎯 <b class="ev-name">${striker.name}</b> is clean through, one-on-one with the keeper!`, 'chance', team);
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+                this._addStat(striker, 'shots');
 
                 const composure = (striker.composure || 70) / 100;
                 const gkRating  = gk ? ((gk.reflexes || 70) + (gk.positioning || 70)) / 200 : 0.6;
@@ -3058,7 +3136,7 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const scorer = teamObj.getRandomPlayer(true);
                 const reason = Math.random() < 0.6 ? 'offside' : 'foul in the build-up';
-                this.addEvent(`🚫 GOAL DISALLOWED — <b class="ev-name">${scorer.name}</b>'s effort ruled out for ${reason}!`, 'card', team);
+                this.addEvent(`🚫 GOAL DISALLOWED — <b class="ev-name">${scorer.name}</b>'s effort ruled out for ${reason}!`, 'card', team, 'critical');
                 this._emitMatchEvent('offside', { team });
             }
 
@@ -3072,6 +3150,7 @@
                 const moves = ['acrobatic volley', 'bicycle kick', 'overhead kick', 'diving header'];
                 const move  = moves[Math.floor(Math.random() * moves.length)];
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+                this._addStat(acrobat, 'shots');
 
                 const skill = ((acrobat.finishing || 65) + (acrobat.composure || 65) + (acrobat.luck || 50)) / 300;
                 if (Math.random() < skill * 0.35) {
@@ -3100,7 +3179,7 @@
                 const attObj  = attTeam === 'player' ? this.playerTeam : this.cpuTeam;
                 const fwds    = attObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position));
                 const caught  = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : attObj.getRandomPlayer(true);
-                this.addEvent(`🚩 Offside! <b class="ev-name">${caught.name}</b> is caught the wrong side of the last defender`, 'pass', attTeam);
+                this.addEvent(`🚩 Offside! <b class="ev-name">${caught.name}</b> is caught the wrong side of the last defender`, 'pass', attTeam, 'medium');
                 this._emitMatchEvent('offside', { team: attTeam });
             }
 
@@ -3114,10 +3193,10 @@
             // ─── Flavor events (no possession change, atmosphere) ────────────────────
 
             streakerEvent() {
-                this.addEvent(`🩲 A streaker has invaded the pitch! Stewards give chase as the players look on bemused...`, 'card');
+                this.addEvent(`🩲 A streaker has invaded the pitch! Stewards give chase as the players look on bemused...`, 'card', null, 'flavor');
             }
             pitchInvaderEvent() {
-                this.addEvent(`👤 An over-excited supporter rushes onto the pitch! Play is briefly halted.`, 'card');
+                this.addEvent(`👤 An over-excited supporter rushes onto the pitch! Play is briefly halted.`, 'card', null, 'flavor');
             }
             crowdChantEvent() {
                 const chants = [
@@ -3126,24 +3205,24 @@
                     '"Olé! Olé! Olé!" rings around the stadium.',
                     'The crowd whistles every touch from the visitors.',
                 ];
-                this.addEvent(`📣 ${chants[Math.floor(Math.random() * chants.length)]}`, 'pass');
+                this.addEvent(`📣 ${chants[Math.floor(Math.random() * chants.length)]}`, 'pass', null, 'flavor');
             }
             weatherEvent() {
                 const w = ['☔ Rain begins to lash down — the pitch is getting slick.',
                            '🌫️ A thick fog rolls in across the stadium.',
                            '🌬️ A swirling wind is making life hard for the goalkeepers.',
                            '❄️ Light snow flurries are blowing across the pitch.'];
-                this.addEvent(w[Math.floor(Math.random() * w.length)], 'pass');
+                this.addEvent(w[Math.floor(Math.random() * w.length)], 'pass', null, 'flavor');
             }
             floodlightEvent() {
-                this.addEvent(`💡 One of the floodlights flickers — brief delay as the officials check it.`, 'card');
+                this.addEvent(`💡 One of the floodlights flickers — brief delay as the officials check it.`, 'card', null, 'flavor');
             }
             managerArguesEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
-                this.addEvent(`📋 The ${teamObj?.clubName || 'manager'} boss is raging at the fourth official on the touchline!`, 'card', team);
+                this.addEvent(`📋 The ${teamObj?.clubName || 'manager'} boss is raging at the fourth official on the touchline!`, 'card', team, 'flavor');
             }
             ballBoyEvent() {
-                this.addEvent(`👦 A ball boy holds onto the ball just a touch too long — words exchanged!`, 'pass');
+                this.addEvent(`👦 A ball boy holds onto the ball just a touch too long — words exchanged!`, 'pass', null, 'flavor');
             }
 
             updatePossession() {
@@ -3197,10 +3276,30 @@
                 document.getElementById('cpuPoss').textContent = Math.round(this.stats.cpuPossession);
             }
 
-            addEvent(message, type, team = null) {
+            // Default importance tier per coarse event type. Specific call sites can override by
+            // passing an explicit `priority` argument (e.g. a routine pass is 'low' by default,
+            // but a "through ball" or "screamer goal" can call addEvent(...'critical')).
+            //   critical → goal, red card, send-off, stretchered injury, penalty/freekick goal
+            //   high     → chance / save / bar / miss / spectacular / one-on-one / through-ball
+            //   medium   → corner, throw-in, freekick award, yellow card, sub, offside
+            //   low      → routine pass / tackle / dribble / goal kick
+            //   flavor   → streaker, weather, ball boy, crowd chant, manager argues
+            static EVENT_PRIORITY_DEFAULT = {
+                goal:    'critical',
+                chance:  'high',
+                save:    'high',
+                card:    'medium',
+                injury:  'medium',
+                pass:    'low',
+                tackle:  'low',
+            };
+
+            addEvent(message, type, team = null, priority = null) {
                 const eventsLog = document.getElementById('eventsLog');
+                const pri = priority || FootballSimulator.EVENT_PRIORITY_DEFAULT[type] || 'low';
                 const eventEl = document.createElement('div');
-                eventEl.className = `event ${type}`;
+                eventEl.className = `event ${type} event-pri-${pri}`;
+                eventEl.dataset.priority = pri;
                 eventEl.innerHTML = message;
                 if (team === 'player' && this.playerTeam) {
                     const c = this.playerTeam.jerseyColor;
@@ -3215,8 +3314,34 @@
                     eventEl.style.borderLeft = `3px solid rgba(${r},${g},${b},0.85)`;
                     eventEl.style.color      = '#EEF3EE';
                 }
+
+                // Hide on the fly if the user has filtered to a higher tier
+                const filter = this.eventLogFilter || 'all';
+                const rank = { critical: 4, high: 3, medium: 2, low: 1, flavor: 0 };
+                const minRank = { all: 0, important: 2, critical: 4 }[filter] || 0;
+                if (rank[pri] < minRank) eventEl.style.display = 'none';
+
                 eventsLog.appendChild(eventEl);
                 eventsLog.scrollTop = eventsLog.scrollHeight;
+            }
+
+            // Re-apply the visibility filter to all existing rows. Called when the user clicks
+            // the All / Important / Critical buttons above the event log.
+            setEventLogFilter(filter) {
+                if (!['all', 'important', 'critical'].includes(filter)) return;
+                this.eventLogFilter = filter;
+                const rank = { critical: 4, high: 3, medium: 2, low: 1, flavor: 0 };
+                const minRank = { all: 0, important: 2, critical: 4 }[filter] || 0;
+                document.querySelectorAll('.events-log .event').forEach(el => {
+                    const r = rank[el.dataset.priority || 'low'] ?? 1;
+                    el.style.display = (r < minRank) ? 'none' : '';
+                });
+                document.querySelectorAll('.event-log-filter-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.filter === filter);
+                });
+                // Auto-scroll to bottom after filter change
+                const el = document.getElementById('eventsLog');
+                if (el) el.scrollTop = el.scrollHeight;
             }
 
             togglePause() {
@@ -4002,7 +4127,10 @@
                     const minute = this.rules.getMatchMinute(this.timeRemaining);
                     this.rules.recordSub('player');
                     this.substitutions.push({ team: 'player', playerOut: this.selectedPlayerOut.name, playerIn: this.selectedPlayerIn.name, time: `${minute}'` });
-                    this.addEvent(`🔄 Sub (${minute}'): <b class="ev-name">${this.selectedPlayerOut.name}</b> off, <b class="ev-name">${this.selectedPlayerIn.name}</b> on!`, 'tackle', 'player');
+                    this.addEvent(`🔄 Sub (${minute}'): <b class="ev-name">${this.selectedPlayerOut.name}</b> off, <b class="ev-name">${this.selectedPlayerIn.name}</b> on!`, 'tackle', 'player', 'medium');
+                    // Track minutes played for both sides of the swap.
+                    this._statSubOff(this.selectedPlayerOut);
+                    this._statSubOn(this.selectedPlayerIn);
                 }
 
                 this.selectedPlayerOut = null;
@@ -4130,8 +4258,54 @@
                 document.getElementById('pauseBtn').style.display = 'none';
                 document.getElementById('endBtn').style.display = 'block';
 
+                this._finalizePlayerStats();   // close minute counters for everyone still on
                 this.switchScreen('resultScreen');
                 this.displayResult();
+            }
+
+            // Render the two per-team performance columns on the result screen.
+            _renderPlayerPerformanceTable() {
+                const section = document.getElementById('playerStatsSection');
+                if (!section) return;
+
+                const renderCol = (containerId, team) => {
+                    const el = document.getElementById(containerId);
+                    if (!el || !team) return;
+                    // Stats live on each player; filter to those who actually appeared.
+                    const players = team.players
+                        .map(p => ({ p, s: p.stats }))
+                        .filter(x => x.s && x.s.minutesPlayed > 0)
+                        .sort((a, b) => b.s.minutesPlayed - a.s.minutesPlayed);
+
+                    el.innerHTML = `
+                        <div class="ps-team-head">${team.clubName}</div>
+                        <div class="player-stats-row header">
+                            <span>Player</span>
+                            <span class="ps-num">Min</span>
+                            <span class="ps-num">Sht</span>
+                            <span class="ps-num">Pas</span>
+                            <span class="ps-num">Drb</span>
+                            <span class="ps-num">Duel</span>
+                        </div>
+                        ${players.map(({ p, s }) => {
+                            const dim = v => v === 0 ? ' zero' : '';
+                            return `
+                                <div class="player-stats-row" title="${this._positionDisplay(p)}">
+                                    <span class="ps-name">${p.flag ? p.flag + ' ' : ''}${p.name}</span>
+                                    <span class="ps-num">${Math.round(s.minutesPlayed)}'</span>
+                                    <span class="ps-num${dim(s.shots)}">${s.shots}</span>
+                                    <span class="ps-num${dim(s.passes)}">${s.passes}</span>
+                                    <span class="ps-num${dim(s.dribbles)}">${s.dribbles}</span>
+                                    <span class="ps-num${dim(s.duelsWon)}">${s.duelsWon}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    `;
+                };
+
+                renderCol('playerStatsLeft',  this.playerTeam);
+                renderCol('playerStatsRight', this.cpuTeam);
+                section.style.display = 'block';
             }
 
             displayResult() {
@@ -4244,6 +4418,9 @@
 
                     document.getElementById('cardsSection').style.display = 'block';
                 }
+
+                // Per-player performance table — minutes / shots / passes / dribbles / duels
+                this._renderPlayerPerformanceTable();
             }
 
             reset() {
