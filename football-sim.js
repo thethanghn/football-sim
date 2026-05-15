@@ -815,29 +815,45 @@
                 return 'terrible';                  // 10 %
             }
 
-            // CM 01/02-style individual player instructions, sensible defaults by position.
+            // CM 03/04-style individual player instructions, sensible defaults by position.
+            // Mentality / Tackling / Passing default to 'default' meaning "follow team setting";
+            // setting them to a concrete value overrides the team tactic for that player.
             static defaultInstructions(position) {
                 const inst = {
                     forwardRuns:  'mixed',   // often | mixed | rarely
                     runWithBall:  'mixed',   // often | mixed | rarely
                     longShots:    'mixed',   // often | mixed | rarely
                     throughBalls: 'mixed',   // often | mixed | rarely
-                    holdUpBall:   'no',      // yes | no
+                    crossBall:    'mixed',   // often | mixed | rarely (wide players)
+                    holdUpBall:   'no',      // yes | no (forwards)
+                    tightMarking: 'no',      // yes | no (defenders / midfielders)
                     freeRole:     'no',      // yes | no
-                    arrow:        null,      // null | 'forward' | 'back' | 'left' | 'right' | 'forward-left' | 'forward-right' | 'back-left' | 'back-right'
+                    arrow:        null,      // null | 8 compass directions
+                    // Per-player overrides of team tactics. 'default' = follow team.
+                    mentality:    'default', // default | ultra-def | defensive | normal | attacking | gung-ho
+                    tackling:     'default', // default | hard | normal | easy
+                    passing:      'default', // default | direct | mixed | short
                 };
                 if (['ST','CF'].includes(position)) {
                     inst.forwardRuns = 'often'; inst.holdUpBall = 'yes'; inst.longShots = 'often';
+                    inst.crossBall = 'rarely';
                 } else if (['LW','RW'].includes(position)) {
-                    inst.forwardRuns = 'often'; inst.runWithBall = 'often';
+                    inst.forwardRuns = 'often'; inst.runWithBall = 'often'; inst.crossBall = 'often';
                 } else if (position === 'CAM') {
                     inst.forwardRuns = 'often'; inst.runWithBall = 'often'; inst.throughBalls = 'often';
-                } else if (['LM','RM','LWB','RWB'].includes(position)) {
-                    inst.runWithBall = 'often';
+                    inst.crossBall = 'rarely';
+                } else if (['LM','RM'].includes(position)) {
+                    inst.runWithBall = 'often'; inst.crossBall = 'often';
+                } else if (['LWB','RWB'].includes(position)) {
+                    inst.runWithBall = 'often'; inst.crossBall = 'often'; inst.tightMarking = 'yes';
                 } else if (position === 'CM') {
                     inst.throughBalls = 'often';
-                } else if (['CB','CDM','LB','RB'].includes(position)) {
+                } else if (['LB','RB'].includes(position)) {
                     inst.forwardRuns = 'rarely'; inst.runWithBall = 'rarely'; inst.longShots = 'rarely';
+                    inst.crossBall = 'mixed'; inst.tightMarking = 'yes';
+                } else if (['CB','CDM'].includes(position)) {
+                    inst.forwardRuns = 'rarely'; inst.runWithBall = 'rarely'; inst.longShots = 'rarely';
+                    inst.tightMarking = 'yes';
                 } else if (position === 'GK') {
                     inst.forwardRuns = 'rarely'; inst.runWithBall = 'rarely'; inst.longShots = 'rarely';
                 }
@@ -1233,7 +1249,7 @@
                 this.substitutions = [];
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral'; // kept for legacy compat
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', longShots: 'mixed' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
                 this.momentum = 50; // 0=CPU dominates, 100=player dominates
                 this._attackPhase = null; // null | 'buildup' | 'progression' | 'danger'
                 this._attackTeam  = null; // 'player' | 'cpu'
@@ -1369,6 +1385,14 @@
                 return '#22C55E';
             }
 
+            // CM 03/04: per-player Mentality / Tackling / Passing override the team setting.
+            // 'default' on the player means "follow team". Returns the effective value.
+            _playerTactic(player, key) {
+                const v = player?.instructions?.[key];
+                if (v && v !== 'default') return v;
+                return this.tactics[key];
+            }
+
             // Display a player's positional competence as "Natural/Sec1/Sec2".
             // E.g. ST with secondaries [CF, CAM] → "ST/CF/CAM". Falls back to plain natural
             // (or current position) when no secondaries exist.
@@ -1403,6 +1427,22 @@
             }
             _moraleLabel(morale) {
                 return ({ top:'Top form', good:'Good', normal:'Normal', poor:'Poor', terrible:'Terrible' })[morale] || 'Normal';
+            }
+
+            // Chunky SVG arrow for the PES-style morale indicator. Far more legible than the
+            // unicode glyph at small sizes — drawn as a thick filled shape with a black outline,
+            // rotated per tier. Used by the bench list, formation slot, and details overlay.
+            _moraleArrowSVG(morale, size = 14) {
+                if (!morale) return '';
+                const color = this._moraleColor(morale);
+                const rot = ({ top: 0, good: 45, normal: 90, poor: 135, terrible: 180 })[morale] ?? 90;
+                // 24×24 viewBox; default shape points up
+                return `<svg class="morale-arrow-svg" viewBox="0 0 24 24" width="${size}" height="${size}"
+                    style="transform: rotate(${rot}deg); display: inline-block; vertical-align: middle;"
+                    aria-label="${this._moraleLabel(morale)}">
+                    <path d="M12 2 L21 12 L15.5 12 L15.5 22 L8.5 22 L8.5 12 L3 12 Z"
+                          fill="${color}" stroke="#000" stroke-width="2" stroke-linejoin="round"/>
+                </svg>`;
             }
 
             // Compute a goalkeeper jersey colour from the outfield kit with maximum contrast.
@@ -1480,6 +1520,10 @@
                                     ? ` · <span style="color:#FF9500;">⚠ playing ${player.position}</span>`
                                     : ''
                             }</div>
+                            <div class="player-detail-form">
+                                Form: ${this._moraleArrowSVG(player.morale, 20)}
+                                <span style="color:${this._moraleColor(player.morale)}; font-weight: 700; letter-spacing: 0.4px;">${this._moraleLabel(player.morale)}</span>
+                            </div>
                             <div class="player-detail-number">#${player.number}</div>
                         </div>
                     </div>
@@ -2120,10 +2164,13 @@
                 // Visual: show the ball changing hands, now anchored to the new zone
                 this._emitMatchEvent('possession', this._eventPayload({ team: possession, jitter: 14 }));
 
-                // Gung-ho / direct teams launch immediately, skipping patient buildup
+                // Gung-ho / direct teams launch immediately, skipping patient buildup.
+                // Counter-Attack tactic adds a big +35 % chance to skip — the team wins it deep
+                // and breaks fast (only applies for the player team for now; CPU baseline is no).
                 const skipChance = possession === 'player'
                     ? ({ 'gung-ho': 0.40, 'attacking': 0.20, 'normal': 0, 'defensive': 0, 'ultra-def': 0 }[this.tactics.mentality] || 0)
                       + ({ 'direct': 0.20, 'mixed': 0, 'short': 0 }[this.tactics.passing] || 0)
+                      + (this.tactics.counterAttack === 'yes' ? 0.35 : 0)
                     : 0;
 
                 this._attackPhase = Math.random() < skipChance ? 'progression' : 'buildup';
@@ -2142,7 +2189,11 @@
                 const pressMod   = opp === 'player'
                     ? ({ 'always': 1.40, 'standard': 1.0, 'stand-off': 0.60, 'own-half': 0.75 }[this.tactics.closingDown] || 1.0)
                     : 1.0;
-                const turnoverChance = (defZones.midfield / 100) * pressMod * 0.18;
+                // Man-marking sticks tighter to ball-carriers → modest turnover bonus.
+                const markMod = opp === 'player'
+                    ? (this.tactics.marking === 'man' ? 1.10 : 1.0)
+                    : 1.0;
+                const turnoverChance = (defZones.midfield / 100) * pressMod * markMod * 0.18;
 
                 if (Math.random() < turnoverChance) {
                     // Sometimes a defensive header wins the duel instead of a tackle
@@ -2154,8 +2205,15 @@
                     return;
                 }
 
-                // Ball briefly out of play — team retains via throw-in, slight delay
-                if (Math.random() < 0.06) {
+                // Ball briefly out of play — team retains via throw-in. Time-wasting tactic
+                // boosts this chance when the team is in front (and never below baseline).
+                const isLeading = team === 'player'
+                    ? this.playerScore > this.cpuScore
+                    : this.cpuScore > this.playerScore;
+                const twMult = team === 'player' && isLeading
+                    ? ({ never: 1.0, mixed: 1.5, often: 2.5 }[this.tactics.timeWasting] || 1.0)
+                    : 1.0;
+                if (Math.random() < 0.06 * twMult) {
                     this.throwInEvent(team);
                     return; // Stay in buildup, same tick count
                 }
@@ -2222,16 +2280,13 @@
                 }
 
                 // Speculative long shot from outside the box — ends the attack.
-                // Probability scales with how many onfield mids have longShots: often,
-                // then multiplied by the team-level Long Shots tactic.
+                // Probability scales only with how many onfield mids have the individual
+                // longShots instruction set to 'often' (Long Shots is per-player only in CM 03/04).
                 const teamObjLS = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const oftenShooters = teamObjLS?.onField?.filter(p =>
                     ['CM','CAM','CDM','LM','RM'].includes(p.position) && p.instructions?.longShots === 'often'
                 ).length || 0;
-                const teamLSMult = team === 'player'
-                    ? ({ 'often': 1.6, 'mixed': 1.0, 'rarely': 0.35 }[this.tactics.longShots] || 1.0)
-                    : 1.0;   // CPU uses its own default until a CPU tactics layer exists
-                const lsProb = Math.min(0.30, (0.06 + oftenShooters * 0.035) * teamLSMult);
+                const lsProb = Math.min(0.25, 0.06 + oftenShooters * 0.045);
                 if (Math.random() < lsProb) {
                     this.longShotEvent(team);
                     this._attackPhase = null;
@@ -2274,10 +2329,18 @@
                         ['CAM','CM','LW','RW'].includes(p.position) && p.instructions?.throughBalls === 'often'
                     ).length || 0;
                     const tbProb = Math.min(0.55, 0.18 + oftenPassers * 0.10);
+                    // Wing crosses: when wide players are set to crossBall: often, the final ball
+                    // becomes a cross into the box (resolves as an aerial chance / header).
+                    const oftenCrossers = teamObjForHold?.onField?.filter(p =>
+                        ['LB','RB','LWB','RWB','LM','RM','LW','RW'].includes(p.position)
+                        && p.instructions?.crossBall === 'often'
+                    ).length || 0;
+                    const crossProb = Math.min(0.45, 0.05 + oftenCrossers * 0.10);
                     // Ball travels into the danger zone (final third)
                     this._setZone(team === 'player' ? 4 : 0, this._attackLane);
-                    if (Math.random() < tbProb) this.throughBallEvent(team);
-                    else                        this.passEvent(team);
+                    if (Math.random() < crossProb)        this.headerEvent(team, true);
+                    else if (Math.random() < tbProb)      this.throughBallEvent(team);
+                    else                                  this.passEvent(team);
                     this._attackPhase = 'danger';
                     this._phaseTicks  = 0;
                 } else {
@@ -2459,10 +2522,13 @@
                 const tacklePower = ((defender.tackling || 65) * 0.55 + (defender.anticipation || 65) * 0.45) / 100;
                 const tackleSuccess = tacklePower * (staminaFactor + (1 - staminaFactor) * det * 0.5) * 0.9 + 0.15;
 
-                // Tackling setting: hard = more success but more fouls; easy = fewer fouls, fewer wins
-                const tacklingStyle = this.tactics.tackling || 'normal';
+                // Tackling style: defender's individual setting overrides team via _playerTactic.
+                // hard = more success but more fouls; easy = fewer fouls, fewer wins.
+                const tacklingStyle = this._playerTactic(defender, 'tackling') || 'normal';
                 const tackleBoost  = tacklingStyle === 'hard' ? 0.08 : tacklingStyle === 'easy' ? -0.08 : 0;
-                const adjustedSuccess = Math.min(0.92, tackleSuccess + tackleBoost);
+                // Tight-marking tacklers stick closer and read the ball-carrier — modest extra boost
+                const tightBoost   = defender.instructions?.tightMarking === 'yes' ? 0.06 : 0;
+                const adjustedSuccess = Math.min(0.92, tackleSuccess + tackleBoost + tightBoost);
                 const foulRate     = tacklingStyle === 'hard' ? 0.55 : tacklingStyle === 'easy' ? 0.20 : 0.40;
 
                 if (Math.random() > adjustedSuccess) {
@@ -2523,14 +2589,16 @@
                 const staminaFactor = (passer.stamina || 70) / 100;
                 let passAccuracy = passSkill * (staminaFactor * 0.3 + 0.7);
 
-                // Passing style: short = safer; direct = riskier but can trigger through-balls
-                if (team === 'player') {
-                    if (this.tactics.passing === 'short')  passAccuracy = Math.min(0.96, passAccuracy * 1.06);
-                    if (this.tactics.passing === 'direct') passAccuracy *= 0.92;
-                }
+                // Passing style — passer's individual setting overrides team via _playerTactic.
+                // short = safer; direct = riskier but enables through-balls.
+                const passerStyle = team === 'player'
+                    ? (this._playerTactic(passer, 'passing') || 'mixed')
+                    : 'mixed';
+                if (passerStyle === 'short')  passAccuracy = Math.min(0.96, passAccuracy * 1.06);
+                if (passerStyle === 'direct') passAccuracy *= 0.92;
 
                 if (Math.random() > Math.min(0.96, passAccuracy)) {
-                    const lostDesc = team === 'player' && this.tactics.passing === 'direct'
+                    const lostDesc = passerStyle === 'direct'
                         ? `⚪ <b class="ev-name">${passer.name}</b>'s direct pass is intercepted!`
                         : `⚪ <b class="ev-name">${passer.name}</b> gives the ball away!`;
                     this.addEvent(lostDesc, 'pass', team);
@@ -2560,10 +2628,10 @@
                     }
                 }
 
-                // Describe pass quality based on vision and passing style
+                // Describe pass quality — passerStyle already resolved with per-player override
                 const vision = passer.vision || 60;
-                const styleLabel = (team === 'player' && this.tactics.passing === 'direct') ? 'direct ball'
-                                 : (team === 'player' && this.tactics.passing === 'short')  ? 'short pass'
+                const styleLabel = passerStyle === 'direct' ? 'direct ball'
+                                 : passerStyle === 'short'  ? 'short pass'
                                  : (vision > 80 ? 'incisive ball' : vision > 65 ? 'good pass' : 'short pass');
                 const passDesc = styleLabel;
 
@@ -3358,7 +3426,7 @@
                                 draggable="true"
                                 data-player-id="${p.id}"
                                 data-default-x="${defX}" data-default-y="${defY}">
-                            <span class="fm-morale-arrow" style="color:${moraleCol};" title="${moraleLb} form">${moraleGl}</span>
+                            <span class="fm-morale-arrow" title="${moraleLb} form">${this._moraleArrowSVG(p.morale, 18)}</span>
                             <div class="fm-player-avatar">${avatarSVG}</div>
                             <span class="fm-player-name">${lastName}</span>
                             <span class="fm-player-meta">${posHtml} · <b style="color:${ovrColor};">${ovr}</b></span>
@@ -3370,14 +3438,21 @@
                     <div class="fm-formation-label">${fmtLabels[formation] || formation}</div>
                 `;
 
-                // Wire click → context menu, plus drag handlers.
+                // Wire single-click → context menu, double-click → details overlay.
+                // _bindClicks defers the single-click action by 240 ms so a dblclick can cancel it.
                 pitch.querySelectorAll('.fm-player-slot').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const id = parseInt(btn.dataset.playerId);
-                        const p  = squad.find(pl => pl.id === id);
-                        if (p) this._showPlayerContextMenu(p, e.clientX, e.clientY);
-                    });
+                    const lookup = () => squad.find(pl => pl.id === parseInt(btn.dataset.playerId));
+                    this._bindClicks(
+                        btn,
+                        // single click — keep track of the click point for menu placement
+                        () => {
+                            const p = lookup();
+                            const r = btn.getBoundingClientRect();
+                            if (p) this._showPlayerContextMenu(p, r.right, r.top);
+                        },
+                        // double click — open details overlay directly
+                        () => { const p = lookup(); if (p) this.showPlayerDetail(p); }
+                    );
                     this._bindSlotDrag(btn, 'xi');
                 });
                 // Make the pitch area itself a drop target (for repositioning + dropping bench players)
@@ -3457,14 +3532,22 @@
                 if (!player.instructions) player.instructions = Team.defaultInstructions(player.position);
                 title.textContent = `⚙ ${player.name} — Instructions`;
 
-                const isFwd = ['ST','CF','CAM','LW','RW'].includes(player.position);
+                const isFwd  = ['ST','CF','CAM','LW','RW'].includes(player.position);
+                const isWide = ['LB','RB','LWB','RWB','LM','RM','LW','RW'].includes(player.position);
+                const isDef  = ['CB','CDM','LB','RB','LWB','RWB','CM','CDM'].includes(player.position);
                 const rows = [
                     { key: 'forwardRuns',  label: 'Forward Runs',  opts: ['rarely','mixed','often'] },
                     { key: 'runWithBall',  label: 'Run With Ball', opts: ['rarely','mixed','often'] },
                     { key: 'longShots',    label: 'Long Shots',    opts: ['rarely','mixed','often'] },
                     { key: 'throughBalls', label: 'Through Balls', opts: ['rarely','mixed','often'] },
+                    { key: 'crossBall',    label: 'Cross Ball',    opts: ['rarely','mixed','often'], show: isWide },
                     { key: 'holdUpBall',   label: 'Hold Up Ball',  opts: ['no','yes'], show: isFwd },
+                    { key: 'tightMarking', label: 'Tight Marking', opts: ['no','yes'], show: isDef },
                     { key: 'freeRole',     label: 'Free Role',     opts: ['no','yes'] },
+                    // Per-player overrides of team tactics — 'default' means "follow team"
+                    { key: 'mentality',    label: 'Mentality',     opts: ['default','ultra-def','defensive','normal','attacking','gung-ho'] },
+                    { key: 'tackling',     label: 'Tackling',      opts: ['default','hard','normal','easy'] },
+                    { key: 'passing',      label: 'Passing',       opts: ['default','direct','mixed','short'] },
                 ];
                 body.innerHTML = rows.filter(r => r.show !== false).map(row => `
                     <div class="tactic-row">
@@ -3834,7 +3917,7 @@
                         </div>
                         <div class="player-info" style="flex: 1;">
                             <div class="player-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
-                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span> · <span class="morale-arrow" style="color:${moraleCol};" title="${moraleLb} form">${moraleGl}</span></div>
+                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span> <span class="morale-arrow" title="${moraleLb} form">${this._moraleArrowSVG(player.morale, 14)}</span></div>
                             <div class="stamina-bar" title="Stamina ${stamPct}%">
                                 <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
                             </div>
@@ -4183,7 +4266,7 @@
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral';
                 this._cpuLastFormationChangeMinute = 0;
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', longShots: 'mixed' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
                 this.momentum = 50;
                 this._attackPhase = null;
                 this._attackTeam  = null;

@@ -578,24 +578,43 @@
             text-shadow: none;
         }
 
-        /* PES-style match-day morale arrow (red ↑ best → purple ↓ worst) */
+        /* PES-style match-day morale arrow (red ↑ best → purple ↓ worst).
+           SVG-based — drawn as a chunky filled shape with a black outline so it reads at small
+           sizes. The wrapper is a flex inline container that keeps the SVG vertically centred. */
         .morale-arrow {
-            display: inline-block;
-            font-weight: 900;
-            font-size: 13px;
-            line-height: 1;
-            margin-left: 2px;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+            margin-left: 4px;
+            line-height: 0;
+        }
+        .morale-arrow .morale-arrow-svg {
+            filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6));
         }
         .fm-morale-arrow {
             position: absolute;
-            top: -10px; right: -2px;
-            font-weight: 900;
-            font-size: 14px;
-            line-height: 1;
+            top: -9px; right: -3px;
+            line-height: 0;
             pointer-events: none;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.8), 0 0 4px rgba(0,0,0,0.5);
             z-index: 3;
+        }
+        .fm-morale-arrow .morale-arrow-svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+        }
+
+        /* Player Detail form line — sits below age/height */
+        .player-detail-form {
+            font-size: 12px;
+            color: var(--c-text-2);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: 0.3px;
+        }
+        .player-detail-form .morale-arrow-svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7));
         }
 
         /* Compact stamina bar — used in bench player items and formation-pitch slots */
@@ -1953,11 +1972,27 @@
                         </div>
 
                         <div class="tactic-row">
-                            <span class="tactic-label">Long Shots</span>
+                            <span class="tactic-label">Marking</span>
                             <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="longShots" data-value="rarely">Rarely</button>
-                                <button class="tactic-btn active" data-tactic="longShots" data-value="mixed">Mixed</button>
-                                <button class="tactic-btn" data-tactic="longShots" data-value="often">Often</button>
+                                <button class="tactic-btn active" data-tactic="marking" data-value="zonal">Zonal</button>
+                                <button class="tactic-btn" data-tactic="marking" data-value="man">Man</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Time Wasting</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="timeWasting" data-value="never">Never</button>
+                                <button class="tactic-btn active" data-tactic="timeWasting" data-value="mixed">Mixed</button>
+                                <button class="tactic-btn" data-tactic="timeWasting" data-value="often">Often</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Counter Attack</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn active" data-tactic="counterAttack" data-value="no">No</button>
+                                <button class="tactic-btn" data-tactic="counterAttack" data-value="yes">Yes</button>
                             </div>
                         </div>
                     </div>

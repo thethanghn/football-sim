@@ -54,8 +54,10 @@ Each phase also tracks the **attack zone** (`_attackBand`, `_attackLane`) and ad
 - **Mentality** (`ultra-def | defensive | normal | attacking | gung-ho`) — ±16 to midfield, ±28 % to attack/defense in danger.
 - **Pressing** (`always | standard | stand-off | own-half`) — ±40 % to turnover/intercept chances.
 - **Passing** (`direct | mixed | short`) — buildup length, attack multiplier (×0.92–×1.10), through-ball share.
-- **Long Shots (team)** (`rarely | mixed | often`) — ×0.35 / ×1.0 / ×1.6 on long-shot trigger probability.
-- **Tackling** (`hard | normal | easy`) — currently UI only; effect can be wired up later.
+- **Tackling** (`hard | normal | easy`) — ±8 % on tackle success; "hard" raises foul rate.
+- **Marking** (`zonal | man`) — man-marking gives ×1.10 turnover bonus in buildup.
+- **Time Wasting** (`never | mixed | often`) — when leading, multiplies throw-in trigger by 1.0/1.5/2.5.
+- **Counter Attack** (`no | yes`) — `yes` adds 35 % to the chance of skipping buildup and breaking straight into progression on a turnover win.
 - **Momentum** (0–100, running stat) — nudges midfield/attack/defense by ±0.15–0.2 × (momentum − 50).
 - **Stamina × determination** — per-player fatigue multiplier (never below 0.5).
 - **Formation bonus** — multiplies each zone rating by a per-formation factor (see §6).
@@ -233,18 +235,23 @@ Players going back to the bench have their `position` reverted to their `natural
 
 When a slot mismatch leaves a player playing somewhere not in `{natural, secondaries}`, the formation slot renders the position label in **orange with an asterisk** (e.g. `ST/CF/CAM*`), with a tooltip explaining the mismatch. The detail card shows `⚠ playing LB` in orange next to age/height.
 
-### 4.2 Individual instructions (CM 01/02-style)
+### 4.2 Individual instructions (CM 03/04-style)
 
-6 fields per player, defaults vary by position; see `Team.defaultInstructions(position)`.
+8 fields per player + an 8-direction movement arrow. Defaults vary by position; see `Team.defaultInstructions(position)`. Some only appear in the popover for relevant positions (Cross Ball for wide players, Hold Up Ball for forwards, Tight Marking for defenders/mids).
 
 | Instruction | Values | Effect |
 |---|---|---|
 | Forward Runs | rarely / mixed / often | Biases scorer/chance-taker selection; `_pushMult` ×0.65–×1.25 in game-flow |
 | Run With Ball | rarely / mixed / often | Biases dribble-event selection; team-wide trigger rate |
-| Long Shots | rarely / mixed / often | Long-shot shooter weighting; team-wide trigger rate |
+| Long Shots | rarely / mixed / often | Long-shot shooter weighting; raises team's per-progression long-shot trigger probability |
 | Through Balls | rarely / mixed / often | Through-ball passer weighting; final-ball through-ball share |
-| Hold Up Ball | yes / no | When yes on a forward → progression phase +1 tick |
+| Cross Ball | rarely / mixed / often | Wide players — raises the chance the final ball is a cross resolving as a headed chance |
+| Hold Up Ball | yes / no | Forwards — when yes → progression phase +1 tick |
+| Tight Marking | yes / no | Defenders / mids — +6 % to their tackle success when they're the tackler |
 | Free Role | yes / no | Drift amplitudes ×1.4–1.7 in `_driftTick` / `_wingerTick`; wider X clamp |
+| **Mentality** | default / ultra-def / defensive / normal / attacking / gung-ho | Per-player override of team Mentality. `default` follows team. `_pushMult` ×0.65–×1.30 in game-flow — an "attacking" CB ventures forward more, a "defensive" striker tracks back. |
+| **Tackling** | default / hard / normal / easy | Per-player override of team Tackling. Resolved by `_playerTactic(defender, 'tackling')` in `tackleEvent` — affects this defender's tackle success ±8 % and foul rate. |
+| **Passing** | default / direct / mixed / short | Per-player override of team Passing. Resolved by `_playerTactic(passer, 'passing')` in `passEvent` — affects this passer's accuracy and the pass description. |
 
 Plus an 8-direction movement arrow (see §4.3) and a PES-style match-day morale arrow (see §4.6).
 
@@ -319,15 +326,19 @@ So a tired, low-morale, out-of-position player can land around `0.7 × 0.88 × 0
 
 ## 5. Tactics (team-level)
 
-`this.tactics` carries five team-wide knobs, configured via the bottom-right Tactics panel in the management screen.
+`this.tactics` carries seven team-wide knobs, configured via the Tactics panel in the management screen. These match the CM 03/04 canonical team tactical instructions (Long Shots is **not** team-level in CM 03/04 — it lives on each player; see §4.2).
 
-| Tactic | Values | Default |
-|---|---|---|
-| Mentality | ultra-def / defensive / normal / attacking / gung-ho | normal |
-| Pressing | always / standard / stand-off / own-half | standard |
-| Tackling | hard / normal / easy | normal *(UI only — no engine effect yet)* |
-| Passing | direct / mixed / short | mixed |
-| Long Shots | rarely / mixed / often | mixed |
+**Mentality / Tackling / Passing also exist as per-player overrides** (see §4.2 — same names, plus a `default` option that defers to the team setting). The engine reads them via `_playerTactic(player, key)` which returns the player's value when set, otherwise the team's.
+
+| Tactic | Values | Default | Effect |
+|---|---|---|---|
+| Mentality | ultra-def / defensive / normal / attacking / gung-ho | normal | ±16 to midfield, ±28 % to attack/defense in danger; raises buildup-skip chance |
+| Pressing (Closing Down) | always / standard / stand-off / own-half | standard | ±40 % to turnover/intercept chances |
+| Tackling | hard / normal / easy | normal | ±8 % to tackle success; "hard" raises foul rate |
+| Passing | direct / mixed / short | mixed | Shorter buildup with "direct"; longer with "short"; attack multiplier ×0.92–×1.10 |
+| Marking | zonal / man | zonal | Man-marking ×1.10 turnover bonus in buildup |
+| Time Wasting | never / mixed / often | mixed | When leading, multiplies throw-in trigger 1.0× / 1.5× / 2.5× |
+| Counter Attack | no / yes | no | When yes, +35 % chance to skip buildup → straight to progression on a possession win |
 
 ---
 
@@ -562,7 +573,7 @@ Idioms / mechanics borrowed from real football management games:
 |---|---|
 | **CM 03/04** | 19-attribute player model + per-position weighted overall ratings |
 | **CM 01/02** | 8-direction movement arrows from the right-click-drag tactics screen |
-| **CM 01/02** | Six per-player instructions (Forward Runs / Run With Ball / Long Shots / Through Balls / Hold Up Ball / Free Role) |
+| **CM 03/04** | Eight per-player instructions (Forward Runs / Run With Ball / Long Shots / Through Balls / Cross Ball / Hold Up Ball / Tight Marking / Free Role) — plus separate team-level Marking / Time Wasting / Counter Attack |
 | **CM 01/02** | Text-event commentary (CM 01/02 had no 2D engine) |
 | **CM 01/02** | Streaker / pitch invader / weather / floodlight flavour events |
 | **CM / FM** | Multi-position system with natural + secondary positions + out-of-position penalty |

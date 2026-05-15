@@ -195,8 +195,19 @@ class MatchFlow {
         // CM 01/02 forwardRuns instruction: 'often' players push 25 % harder past their home X
         // when the team is attacking; 'rarely' players hold their ground (×0.65).
         const fr = this._instruction(id, 'forwardRuns');
-        if (fr === 'often')  base *= 1.25;
+        if (fr === 'often')       base *= 1.25;
         else if (fr === 'rarely') base *= 0.65;
+
+        // CM 03/04 per-player Mentality override: an "attacking" CB ventures forward more;
+        // a "defensive" striker tracks back. Only applied if the player explicitly overrides
+        // the team mentality (skipped when their setting is 'default'/undefined).
+        const ment = this._instruction(id, 'mentality');
+        if (ment === 'gung-ho')        base *= 1.30;
+        else if (ment === 'attacking') base *= 1.15;
+        else if (ment === 'defensive') base *= 0.80;
+        else if (ment === 'ultra-def') base *= 0.65;
+        // 'normal' and 'default'/null → no change
+
         return base;
     }
 
