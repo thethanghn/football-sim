@@ -7,7 +7,8 @@ football-sim/
 ├── football-sim.html   # markup + all CSS; entry point
 ├── football-sim.js     # simulator, UI, FSM, events, rendering glue
 ├── game-flow.js        # MatchFlow — pitch animation / ball movement
-└── zone-strength.js    # ZoneStrength — pure zone-rating calculators
+├── zone-strength.js    # ZoneStrength — pure zone-rating calculators
+└── random.js           # Random — seeded LCG + pick / range / chance / shuffle / gaussian
 ```
 
 ---
@@ -135,7 +136,7 @@ What the engine actually reads. Returns `{ attack, midfield, defense }`.
 | Defense (outfield) | marking 0.30, tackling 0.25, heading 0.20, anticipation 0.15, strength 0.10 |
 | Defense (GK) | reflexes 0.35, handling 0.30, positioning 0.20, composure 0.15 |
 
-**Step 3**: Apply fatigue multiplier per player — `sf + (1 - sf) × det × 0.5` where `sf = max(0.5, stamina/100)` and `det = determination/100`.
+**Step 3**: Apply `ZoneStrength.perPlayerMult(player)` — `fatigueMult × moraleMult × positionMult` (see §4.7). Stacks stamina drain, match-day form, and out-of-position penalties into one number.
 
 **Step 4**: Bucket-average and multiply by formation bonus.
 
@@ -146,7 +147,7 @@ Debug overlay only. 5 vertical bands × 3 lateral lanes = 15 cells.
 For each onfield player:
 1. Look up their current home position from `matchFlow._home`.
 2. For every cell, compute `d = distance(home, cell_center)`.
-3. If `d < RADIUS` (38 pitch units), contribute `overall × stamina_factor × SCALE × w` where `w = 1 - d/RADIUS` (linear falloff) and `SCALE = 0.6`.
+3. If `d < RADIUS` (38 pitch units), contribute `overall × perPlayerMult × SCALE × w` where `w = 1 - d/RADIUS` (linear falloff), `SCALE = 0.6`, and `perPlayerMult` is the same fatigue × morale × position-penalty composite as §3.1 Step 3.
 
 Cell's reported strength = **sum** (not average) of all weighted contributions — so more players or higher-quality players near a zone = higher number.
 
@@ -189,6 +190,49 @@ Plus position-weighted **overall** rating, shown in the player list / pitch slot
 | 50–59 | 🟡 yellow | Poor |
 | <50 | 🔴 red | Terrible |
 
+### 4.1.1 Bio: age + height
+
+Every player carries an **age** and a **height** (cm), sampled per-position with `Random.gaussianInt`:
+
+| Field | Source | Range |
+|---|---|---|
+| `age` | Normal(25, 4), clamped | 17–38 |
+| `height` | Position-aware Normal — GK/CB/ST taller (188 / 186 / 184 cm means), wingers shorter (175 cm) | 160–205 |
+
+Shown in the detail card as `Age 26 · 184 cm`.
+
+### 4.1.2 Multiple positions
+
+Every player has both a **natural** position (where they're best) and 1–2 **secondary** positions they're competent at. Generated at player creation by `Team.randomSecondaries(position)` from a `POSITION_SECONDARY_POOL` table (e.g. a natural ST can have CF and/or CAM as secondaries; CBs draw from CDM/LB/RB; LWs from LM/CF/ST).
+
+Position is displayed as **`Natural/Sec1/Sec2`** everywhere — bench list, formation slot, detail card. Single-position players (rare, mainly GKs) show just the natural.
+
+When a player is asked to play a slot that doesn't match their natural, an **out-of-position multiplier** kicks in (`ZoneStrength.positionMult`):
+
+| Played role vs. competence | Multiplier |
+|---|---|
+| Natural | **1.00** |
+| One of their secondary positions | **0.88** |
+| Same family but not in their secondary list | **0.72** |
+| Different family entirely | **0.50** |
+
+Position families: `GK`, `centre-back` (CB, CDM), `fullback` (LB/RB/LWB/RWB), `central-mid` (CM, CAM), `wide` (LM/RM/LW/RW), `striker` (ST/CF).
+
+#### When does the playing position differ from the natural?
+
+`Team.SLOT_POSITIONS[formation]` maps each starting-XI slot index to an expected role. `Team.assignSlotPositions(formation)` is called after **every** roster change so the played `position` field matches the slot:
+
+- Initial `setupSquad` (pre-match XI).
+- `confirmSubstitution` (sub).
+- `_handleDragDrop` XI↔XI swap.
+- `changeCpuFormation` (CPU manager AI changes shape mid-match).
+- `injuryEvent` substitution.
+- `handleGKSendOff` already sets `position = 'GK'` for the emergency keeper — they pick up the 0.50× cross-family penalty automatically.
+
+Players going back to the bench have their `position` reverted to their `naturalPosition`.
+
+When a slot mismatch leaves a player playing somewhere not in `{natural, secondaries}`, the formation slot renders the position label in **orange with an asterisk** (e.g. `ST/CF/CAM*`), with a tooltip explaining the mismatch. The detail card shows `⚠ playing LB` in orange next to age/height.
+
 ### 4.2 Individual instructions (CM 01/02-style)
 
 6 fields per player, defaults vary by position; see `Team.defaultInstructions(position)`.
@@ -202,7 +246,7 @@ Plus position-weighted **overall** rating, shown in the player list / pitch slot
 | Hold Up Ball | yes / no | When yes on a forward → progression phase +1 tick |
 | Free Role | yes / no | Drift amplitudes ×1.4–1.7 in `_driftTick` / `_wingerTick`; wider X clamp |
 
-Plus an 8-direction movement arrow (see §5).
+Plus an 8-direction movement arrow (see §4.3) and a PES-style match-day morale arrow (see §4.6).
 
 ### 4.3 Movement arrows
 
@@ -240,6 +284,36 @@ GK gets a contrasting kit derived from the team's outfield colour in HSL:
 5. Lightness inverted: `l < 0.55 → 0.72`, else `→ 0.28`.
 
 So red teams get light cyan GKs, blue teams get light yellow, etc. Applied at every render point (pitch circle, formation slot, bench list, detail card).
+
+### 4.6 Match-day morale (PES-style condition arrows)
+
+Every player rolls a match-day condition tier at generation time (`Team.randomMorale`) on a bell curve biased toward `normal`:
+
+```
+top      10 %     ↑  red / pink   ×1.10
+good     22 %     ↗  orange       ×1.05
+normal   36 %     →  yellow       ×1.00
+poor     22 %     ↘  blue         ×0.95
+terrible 10 %     ↓  purple       ×0.88
+```
+
+The arrow glyph appears:
+- inline in the bench player item (small, next to the position line);
+- floated top-right of each formation-pitch slot.
+
+Engine effect: `ZoneStrength.moraleMult(player)` multiplies the per-player rating contribution. A team collectively in poor form drops 5–12 % across all three zone bands. Visible in the debug zone grid as lower numbers per cell.
+
+Nguyễn Thế Chí Vỹ is hard-coded `top` — the talisman is always up for it.
+
+### 4.7 Combined per-player multiplier
+
+`ZoneStrength.perPlayerMult(player)` composes the three modifiers used everywhere ratings are computed:
+
+```
+perPlayerMult = fatigueMult × moraleMult × positionMult
+```
+
+So a tired, low-morale, out-of-position player can land around `0.7 × 0.88 × 0.5 ≈ 0.31×` — the kind of catastrophic drop that shows up immediately on the debug zone-grid numbers.
 
 ---
 
@@ -374,6 +448,35 @@ X-clamp expands during attacks so wingers can reach the box.
 
 `_evCorner` plants 8 defenders + GK in the box (near post, far post, 6-yard mid, 3× penalty-spot band, 2× edge-of-box) against 5 attackers. Animations complete in ≤660 ms before the cross is delivered at t=750ms.
 
+### 8.4 Kick-off mode
+
+A real kick-off plays out at match start **and** after every goal. `MatchFlow._kickoffMode` is a boolean gate:
+
+1. Flips on (`_doKickoff(kickoffTeam)`).
+2. Every player on **both teams** animates to their own half — `x ≤ 48` for the player team, `x ≥ 52` for CPU. Lateral lane (y) is preserved.
+3. Two forwards from the kicking team go to centre-circle slots at `(48, 48)` & `(48, 52)` (player) or `(52, 48)` & `(52, 52)` (CPU).
+4. Ball animates to `(50, 50)`.
+5. All three movement ticks (`_driftTick`, `_wingerTick`, `_gkTick`) early-return — players are pinned in place.
+6. The simulator's `generateEvent` also skips when `matchFlow._kickoffMode` is true — no shots / passes / tackles fire while players are walking to their halves.
+7. After **1500 ms**, `_releaseKickoff` flips the gate off and the two takers exchange a short pass to start the action.
+
+After a goal, `_evGoal` waits 5.2 s (the celebration) then calls `_doKickoff(team === 'player' ? 'cpu' : 'player')` so the conceding team kicks off, as in real football.
+
+### 8.5 Free kicks
+
+Free kicks resolve in two layers:
+
+- `freeKickEvent(team)` (simulator) — picks a specialist taker (highest `finishing + crossing`), logs `📐 Dangerous free kick`, calls `_emitMatchEvent('freekick')` to trigger the visual, then rolls for **goal / wall / save / over**.
+- `_evFreekick({ team, x, y })` (matchFlow) — animates: 4-man wall in front of ball, GK behind the wall toward the near post, taker stands over it, remaining attackers spread into the box, kick is taken at t=1.2 s, FWDs burst into the box.
+
+Triggers:
+
+| When | How |
+|---|---|
+| Foul in the attacker's attacking third (band ≥ 3 for player, ≤ 1 for CPU) | `tackleEvent` foul branch calls `freeKickEvent(attTeam)` → full simulator-side resolution |
+| Foul elsewhere (own half / midfield) | `tackleEvent` emits only the visual; ball returns to attacking team via the animation |
+| Out-of-the-blue dangerous free kick | `_doDanger` rolls 5 % per shot decision |
+
 ---
 
 ## 9. Speed Modes
@@ -416,11 +519,11 @@ Match ends at `timeRemaining === 0` → `endMatch()` switches to the result scre
 
 ### 11.2 Substitution rules
 
-`FootballRules.MAX_SUBS = 3`. Quotas tracked per team via `recordSub` / `canSubstitute` / `subsRemaining`. Drag-substitute calls `confirmSubstitution` which checks the quota (skipping in pre-match).
+`FootballRules.MAX_SUBS = 3`. Quotas tracked per team via `recordSub` / `canSubstitute` / `subsRemaining`. Drag-substitute calls `confirmSubstitution`, which checks the quota (skipping in pre-match) and then calls `assignSlotPositions(formation)` so the incoming player adopts the slot's expected role. The outgoing player's `position` is reset to their `naturalPosition` as they leave the field.
 
 ### 11.3 Cards & sendings-off
 
-`cardEvent` issues a yellow or red (15 % chance for direct red). Second yellow becomes red. Sent-off players are removed from `onField` via `removeFromField`. GK send-off triggers `handleGKSendOff` which substitutes a bench GK if available, otherwise moves an outfield player into goal.
+`cardEvent` issues a yellow or red (15 % chance for direct red). Second yellow becomes red. Sent-off players are removed from `onField` via `removeFromField`. GK send-off triggers `handleGKSendOff` which substitutes a bench GK if available, otherwise moves an outfield player into goal (`emergency.position = 'GK'`). That outfielder is now in a different position family, so `ZoneStrength.positionMult` automatically applies the 0.50× penalty — emergency keepers play visibly worse.
 
 ### 11.4 Special player
 
@@ -432,15 +535,38 @@ Match ends at `timeRemaining === 0` → `endMatch()` switches to the result scre
 
 ---
 
-## 12. Inspirations & sources
+## 12. Random utilities (in `random.js`)
 
-CM 01/02 / CM 03/04 idioms used here:
+A small standalone `Random` class — the seeded LCG `(a=9301, c=49297, m=233280)` used to live inline in `AvatarGenerator.seededRandom` and `CrestGenerator._rng`; now consolidated here and called as a shim from both for byte-identical seed output.
 
-- 19-attribute CM 03/04 player model + per-position weighted overalls.
-- 8-direction movement arrows from CM 01/02's right-click-drag tactics screen.
-- Six individual instructions (Forward Runs / Run With Ball / Long Shots / Through Balls / Hold Up Ball / Free Role).
-- Text-event commentary (CM 01/02 had no 2D engine).
-- Streaker / pitch invader / weather / floodlight flavour events.
+| Method | Purpose |
+|---|---|
+| `Random.seeded(seed)` | Stateful LCG. Returns a function that yields floats in [0, 1) |
+| `Random.pick(arr, rng?)` | Random element; `rng` defaults to `Math.random` |
+| `Random.range(lo, hi, rng?)` | Integer in `[lo, hi]` inclusive |
+| `Random.chance(p, rng?)` | Boolean — true with probability `p` |
+| `Random.pickWeighted(items, weightOf, rng?)` | Weighted pick |
+| `Random.shuffle(arr, rng?)` | Fisher–Yates copy-shuffle |
+| `Random.gaussian(mean, std, rng?)` | Box–Muller sample |
+| `Random.gaussianInt(mean, std, lo, hi, rng?)` | Clamped + rounded gaussian — used by `Team.randomAge` / `Team.randomHeight` |
+
+The `Math.random()` calls scattered through the engine (event probabilities, formation picks, lane shifts) are intentionally untouched so each match plays out differently. Helpers are available there too if a seeded match replay is ever wanted.
+
+---
+
+## 13. Inspirations & sources
+
+Idioms / mechanics borrowed from real football management games:
+
+| Source | Mechanic |
+|---|---|
+| **CM 03/04** | 19-attribute player model + per-position weighted overall ratings |
+| **CM 01/02** | 8-direction movement arrows from the right-click-drag tactics screen |
+| **CM 01/02** | Six per-player instructions (Forward Runs / Run With Ball / Long Shots / Through Balls / Hold Up Ball / Free Role) |
+| **CM 01/02** | Text-event commentary (CM 01/02 had no 2D engine) |
+| **CM 01/02** | Streaker / pitch invader / weather / floodlight flavour events |
+| **CM / FM** | Multi-position system with natural + secondary positions + out-of-position penalty |
+| **PES** (classic era) | 5-tier condition arrows (red ↑ top → purple ↓ terrible) and the matching colour palette |
 
 References:
 
@@ -449,3 +575,5 @@ References:
 - [Forward Arrows & Forward Runs — Champman 0102 Forums](https://champman0102.net/viewtopic.php?t=4051)
 - [Team & Player Instructions 4 All Tactics — Champman 0102 Forums](https://www.champman0102.net/viewtopic.php?t=2629)
 - [Why people are still playing CM 01/02 — TechRadar](https://www.techradar.com/features/championship-manager-season-01-02)
+- [PES Condition arrows — Pro Evolution Soccer Wiki / Neoseeker](https://pes.neoseeker.com/wiki/Condition_arrows)
+- [PES Form Explained — PES Mastery](https://pesmastery.com/pes-form/)

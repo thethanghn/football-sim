@@ -338,9 +338,8 @@
 
 
         class AvatarGenerator {
-            static seededRandom(seed) {
-                return () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-            }
+            // Seeded RNG now lives in random.js — kept as a shim for backwards compatibility.
+            static seededRandom(seed) { return Random.seeded(seed); }
 
             static shade(hex, pct) {
                 const n = parseInt(hex.replace('#',''), 16), a = Math.round(2.55 * pct);
@@ -622,9 +621,8 @@
         }
 
         class CrestGenerator {
-            static _rng(seed) {
-                return () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-            }
+            // Seeded RNG shared with AvatarGenerator — lives in random.js.
+            static _rng(seed) { return Random.seeded(seed); }
 
             static _lum(hex) {
                 const n = parseInt(hex.replace('#',''), 16);
@@ -734,6 +732,89 @@
         }
 
         class Team {
+            // Expected position for each starting-XI slot in each formation. Order matches the
+            // slot order used by setupSquad/onField (slot 0 = GK, then defenders L→R, mids L→R,
+            // forwards L→R). When a player is placed in a slot, their `position` is set to the
+            // slot's expected position — `naturalPosition` is preserved. ZoneStrength.positionMult
+            // then applies the out-of-position penalty automatically.
+            static SLOT_POSITIONS = {
+                '442': ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST'],
+                '433': ['GK', 'LB', 'CB', 'CB', 'RB', 'CDM', 'CM', 'CM', 'LW', 'ST', 'RW'],
+                '451': ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CDM', 'CM', 'CAM', 'RM', 'ST'],
+                '532': ['GK', 'LWB', 'CB', 'CB', 'CB', 'RWB', 'CDM', 'CM', 'CAM', 'ST', 'ST'],
+                '541': ['GK', 'LWB', 'CB', 'CB', 'CB', 'RWB', 'LM', 'CM', 'CM', 'RM', 'ST'],
+                '352': ['GK', 'CB', 'CB', 'CB', 'LWB', 'CDM', 'CM', 'CAM', 'RWB', 'ST', 'ST'],
+                '343': ['GK', 'CB', 'CB', 'CB', 'LM', 'CDM', 'CM', 'RM', 'LW', 'ST', 'RW'],
+            };
+
+            // Per-position "secondary-position pool" — when generating a player at natural
+            // position X, 1–2 of these are picked as their secondary positions.
+            static POSITION_SECONDARY_POOL = {
+                GK:  [],                                          // dedicated keepers
+                CB:  ['CDM', 'LB', 'RB'],
+                CDM: ['CB', 'CM'],
+                LB:  ['LWB', 'CB', 'LM'],
+                RB:  ['RWB', 'CB', 'RM'],
+                LWB: ['LB', 'LM'],
+                RWB: ['RB', 'RM'],
+                CM:  ['CDM', 'CAM', 'LM', 'RM'],
+                CAM: ['CM', 'ST', 'CF'],
+                LM:  ['LW', 'LB', 'LWB', 'CM'],
+                RM:  ['RW', 'RB', 'RWB', 'CM'],
+                LW:  ['LM', 'CF', 'ST'],
+                RW:  ['RM', 'CF', 'ST'],
+                ST:  ['CF', 'CAM'],
+                CF:  ['ST', 'CAM'],
+            };
+
+            // Pick 1–2 secondary positions from the pool (50 % chance of having a 2nd).
+            static randomSecondaries(naturalPos) {
+                const pool = Team.POSITION_SECONDARY_POOL[naturalPos] || [];
+                if (!pool.length) return [];
+                const shuffled = Random.shuffle(pool);
+                const count = Math.random() < 0.50 ? 2 : 1;
+                return shuffled.slice(0, Math.min(count, pool.length));
+            }
+
+            // Realistic age distribution — Normal(25, 4), clamped to a professional career range.
+            static randomAge() {
+                return Random.gaussianInt(25, 4, 17, 38);
+            }
+
+            // Position-aware height (cm) using a Normal distribution per role profile.
+            // GKs / CBs / target STs trend tall; wide midfielders / wingers trend shorter.
+            static randomHeight(position) {
+                const profile = ({
+                    GK:  { mean: 188, std: 5 },
+                    CB:  { mean: 186, std: 5 },
+                    ST:  { mean: 184, std: 6 },
+                    CF:  { mean: 182, std: 6 },
+                    CDM: { mean: 182, std: 5 },
+                    CM:  { mean: 180, std: 5 },
+                    LB:  { mean: 178, std: 4 },
+                    RB:  { mean: 178, std: 4 },
+                    LWB: { mean: 177, std: 4 },
+                    RWB: { mean: 177, std: 4 },
+                    CAM: { mean: 177, std: 5 },
+                    LM:  { mean: 177, std: 5 },
+                    RM:  { mean: 177, std: 5 },
+                    LW:  { mean: 175, std: 5 },
+                    RW:  { mean: 175, std: 5 },
+                })[position] || { mean: 180, std: 5 };
+                return Random.gaussianInt(profile.mean, profile.std, 160, 205);
+            }
+
+            // PES-style match-day morale (5 tiers). Bell-curve distribution biased toward 'normal'.
+            // Order best → worst: top / good / normal / poor / terrible.
+            static randomMorale() {
+                const r = Math.random();
+                if (r < 0.10) return 'top';        // 10 %
+                if (r < 0.32) return 'good';       // 22 %
+                if (r < 0.68) return 'normal';     // 36 %
+                if (r < 0.90) return 'poor';       // 22 %
+                return 'terrible';                  // 10 %
+            }
+
             // CM 01/02-style individual player instructions, sensible defaults by position.
             static defaultInstructions(position) {
                 const inst = {
@@ -797,14 +878,19 @@
                         name,
                         flag: nation.flag,
                         nationality: nation.name,
-                        position,
+                        position,                              // current playing position
+                        naturalPosition: position,             // what they were trained at (1.0× efficiency here)
+                        secondaryPositions: Team.randomSecondaries(position), // 0.88× efficiency
                         number: i + 1,
+                        age:    Team.randomAge(),
+                        height: Team.randomHeight(position),    // cm
                         appearances: 0,
                         goals: 0,
                         assists: 0,
                         isOnField: false,
                         avatar: AvatarGenerator.generateAvatar(i, this.jerseyColor),
                         instructions: Team.defaultInstructions(position),
+                        morale: Team.randomMorale(),
                         ...attributes
                     });
                 }
@@ -828,6 +914,10 @@
                         shooting: 92, speed: 89, offensive: 91, defensive: 45,
                         influence: 95, luck: 85,
                         overall: 93,
+                        morale: 'top',   // talisman is always up for it
+                        age: 25, height: 178,
+                        naturalPosition: 'ST',
+                        secondaryPositions: ['CF', 'CAM'],   // can drop into the hole
                     };
                 }
 
@@ -969,6 +1059,22 @@
                 this.startingXI = lineup.slice(0, needed);
                 this.bench = this.players.filter(p => !this.startingXI.find(s => s.id === p.id));
                 this.onField = this.startingXI.map(p => ({...p, isOnField: true}));
+
+                // Force each onField slot to play its formation-expected role. Natural positions
+                // are preserved so the efficiency penalty kicks in for mismatches.
+                this.assignSlotPositions(formation);
+                // Bench players go back to their natural position label.
+                this.bench.forEach(p => { p.position = p.naturalPosition || p.position; });
+            }
+
+            // Set each onField player's `position` to match the formation slot they occupy.
+            // No-op if the squad doesn't have exactly 11 players (e.g. after a red card).
+            assignSlotPositions(formation) {
+                const slots = Team.SLOT_POSITIONS[formation];
+                if (!slots || this.onField.length !== slots.length) return;
+                this.onField.forEach((p, idx) => {
+                    p.position = slots[idx];
+                });
             }
 
             getRandomPlayer(onFieldOnly = false) {
@@ -1263,6 +1369,42 @@
                 return '#22C55E';
             }
 
+            // Display a player's positional competence as "Natural/Sec1/Sec2".
+            // E.g. ST with secondaries [CF, CAM] → "ST/CF/CAM". Falls back to plain natural
+            // (or current position) when no secondaries exist.
+            _positionDisplay(player) {
+                const natural = player.naturalPosition || player.position;
+                const secs = player.secondaryPositions || [];
+                return secs.length ? `${natural}/${secs.join('/')}` : natural;
+            }
+
+            // True when a player is being asked to play a slot their natural+secondaries don't cover.
+            _isOutOfPosition(player) {
+                const playing = player.position;
+                const natural = player.naturalPosition;
+                if (!natural || playing === natural) return false;
+                const secs = player.secondaryPositions || [];
+                return !secs.includes(playing);
+            }
+
+            // PES condition-arrow palette (classic PES era — best → worst:
+            // red ↑ → orange ↗ → yellow → → blue ↘ → purple ↓).
+            _moraleColor(morale) {
+                return ({
+                    'top':      '#FF2D55',  // red / pink
+                    'good':     '#FF9500',  // orange
+                    'normal':   '#FFCC00',  // yellow
+                    'poor':     '#3B82F6',  // blue
+                    'terrible': '#A855F7',  // purple
+                })[morale] || '#FFCC00';
+            }
+            _moraleGlyph(morale) {
+                return ({ top:'↑', good:'↗', normal:'→', poor:'↘', terrible:'↓' })[morale] || '→';
+            }
+            _moraleLabel(morale) {
+                return ({ top:'Top form', good:'Good', normal:'Normal', poor:'Poor', terrible:'Terrible' })[morale] || 'Normal';
+            }
+
             // Compute a goalkeeper jersey colour from the outfield kit with maximum contrast.
             //   1. Convert team RGB → HSL.
             //   2. Rotate hue 180° (complementary).
@@ -1332,7 +1474,12 @@
                         </div>
                         <div class="player-detail-info">
                             <div class="player-detail-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
-                            <div class="player-detail-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} <span style="font-size:1.1em;font-weight:bold;color:${ovrColor};">${ovr}</span></div>
+                            <div class="player-detail-position">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)} <span style="font-size:1.1em;font-weight:bold;color:${ovrColor};">${ovr}</span></div>
+                            <div class="player-detail-bio">Age ${player.age ?? '?'} · ${player.height ?? '?'} cm${
+                                this._isOutOfPosition(player)
+                                    ? ` · <span style="color:#FF9500;">⚠ playing ${player.position}</span>`
+                                    : ''
+                            }</div>
                             <div class="player-detail-number">#${player.number}</div>
                         </div>
                     </div>
@@ -1757,6 +1904,11 @@
                 const oldFormation = this.cpuFormation;
                 this.cpuFormation = newFormation;
 
+                // Re-role CPU players to the new formation's slot-expected positions.
+                // Any mismatch with their naturalPosition triggers the efficiency penalty.
+                this.cpuTeam?.assignSlotPositions?.(newFormation);
+                this._refreshMatchFlowPlayerInfo?.();
+
                 // Recompute and animate CPU players to their new home positions.
                 // Only update CPU side of matchFlow._home so player team is untouched.
                 if (this.matchFlow && this.pitchRenderer) {
@@ -1900,6 +2052,10 @@
             }
 
             generateEvent() {
+                // Hold off while the kickoff is being set up — the matchFlow is animating players
+                // into their halves and the ball hasn't been kicked yet.
+                if (this.matchFlow?._kickoffMode) return;
+
                 // Rare: late-game special events interrupt any phase
                 if (this.timeRemaining < 35 && Math.random() < 0.03) {
                     this._attackPhase = null; this.substitutionEvent(); return;
@@ -2315,11 +2471,25 @@
                     const effectiveFoulRate = team === 'player' ? foulRate : 0.40;
                     if (Math.random() < effectiveFoulRate) {
                         this.addEvent(`🟡 Foul by <b class="ev-name">${defender.name}</b> (${minute}')! Free kick awarded.`, 'tackle', team);
-                        const foulX = attTeam === 'player'
-                            ? 30 + Math.random() * 40
-                            : 30 + Math.random() * 40;
-                        const foulY = 25 + Math.random() * 50;
-                        this._emitMatchEvent('freekick', { team: attTeam, x: foulX, y: foulY });
+
+                        // A foul in the attacker's attacking third is a "dangerous" free kick —
+                        // run the full simulator-side resolution (taker stands over it, goal /
+                        // wall / save / over). freeKickEvent will also trigger the visual.
+                        // Otherwise it's a routine restart — just animate the visual and let
+                        // possession naturally flow to the attacker.
+                        const inAttackingThird = attTeam === 'player'
+                            ? this._attackBand >= 3
+                            : this._attackBand <= 1;
+                        if (inAttackingThird) {
+                            this.freeKickEvent(attTeam);
+                        } else {
+                            const foulX = attTeam === 'player'
+                                ? 30 + Math.random() * 30   // own half / midfield band
+                                : 40 + Math.random() * 30;
+                            const foulY = 25 + Math.random() * 50;
+                            this._emitMatchEvent('freekick', { team: attTeam, x: foulX, y: foulY });
+                        }
+
                         if (Math.random() < 0.20) this.cardEvent(team); // possible booking
                     } else {
                         this.addEvent(`🛡️ <b class="ev-name">${defender.name}</b> misses the tackle!`, 'tackle', team);
@@ -2583,7 +2753,11 @@
                     const outIndex = teamObj.onField.findIndex(p => p.id === injuredPlayer.id);
                     teamObj.onField[outIndex] = { ...replacement, isOnField: true };
                     teamObj.bench = teamObj.bench.filter(p => p.id !== replacement.id);
+                    // Injured player goes to bench reverted to natural position label
+                    injuredPlayer.position = injuredPlayer.naturalPosition || injuredPlayer.position;
                     teamObj.bench.push(injuredPlayer);
+                    // Replacement assumes the slot's expected position (efficiency penalty if mismatched)
+                    teamObj.assignSlotPositions(team === 'player' ? this.playerFormation : this.cpuFormation);
                     this.rules.recordSub(team);
                     this.substitutions.push({ team, playerOut: injuredPlayer.name, playerIn: replacement.name, time: `${minute}'` });
                     this.addEvent(
@@ -2650,6 +2824,8 @@
 
                 const gk = defTeamObj.onField.find(p => p.position === 'GK');
                 this.addEvent(`📐 Dangerous free kick — <b class="ev-name">${taker.name}</b> stands over it...`, 'pass', team);
+                // Trigger the visual setup (wall + taker + runners) on the pitch.
+                this._emitMatchEvent('freekick', { team });
 
                 const skill = ((taker.finishing || 60) + (taker.crossing || 60)) / 2 / 100;
                 const r = Math.random();
@@ -3167,14 +3343,25 @@
                         const ovrColor  = this._overallColor(ovr);
                         const stamPct = Math.max(0, Math.min(100, Math.round(p.stamina ?? 100)));
                         const stamCol = this._staminaColor(stamPct);
-                        return `<button class="fm-player-slot${sel ? ' selected' : ''}"
+                        const moraleCol = this._moraleColor(p.morale);
+                        const moraleGl  = this._moraleGlyph(p.morale);
+                        const moraleLb  = this._moraleLabel(p.morale);
+                        // Show "Natural/Sec1/Sec2". When the player is playing a slot they have
+                        // no competence for, tint orange + asterisk as a warning.
+                        const competence = this._positionDisplay(p);
+                        const oop = this._isOutOfPosition(p);
+                        const posHtml = oop
+                            ? `<span title="playing ${p.position} — not in their natural/secondary list" style="color:#FF9500;">${competence}*</span>`
+                            : competence;
+                        return `<button class="fm-player-slot${sel ? ' selected' : ''}${oop ? ' out-of-position' : ''}"
                                 style="left:${cx}%;top:${cy}%;transform:translate(-50%,-50%);"
                                 draggable="true"
                                 data-player-id="${p.id}"
                                 data-default-x="${defX}" data-default-y="${defY}">
+                            <span class="fm-morale-arrow" style="color:${moraleCol};" title="${moraleLb} form">${moraleGl}</span>
                             <div class="fm-player-avatar">${avatarSVG}</div>
                             <span class="fm-player-name">${lastName}</span>
-                            <span class="fm-player-meta">${p.position} · <b style="color:${ovrColor};">${ovr}</b></span>
+                            <span class="fm-player-meta">${posHtml} · <b style="color:${ovrColor};">${ovr}</b></span>
                             <div class="stamina-bar" title="Stamina ${stamPct}%">
                                 <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
                             </div>
@@ -3532,6 +3719,9 @@
                     const tmp = this.playerTeam.onField[a];
                     this.playerTeam.onField[a] = this.playerTeam.onField[b];
                     this.playerTeam.onField[b] = tmp;
+                    // Re-apply slot-expected positions — both swapped players now play their new
+                    // slot's role (which may trigger the out-of-position penalty).
+                    this.playerTeam.assignSlotPositions(this.playerFormation);
                     this._refreshMatchFlowPlayerInfo();
                     this.renderManagementPanel();
                 }
@@ -3633,6 +3823,9 @@
                 const avatarSVG = AvatarGenerator.createSVG(player.avatar, 50, this._jerseyFor(player, this.playerTeam?.jerseyColor));
                 const stamPct   = Math.max(0, Math.min(100, Math.round(player.stamina ?? 100)));
                 const stamCol   = this._staminaColor(stamPct);
+                const moraleCol = this._moraleColor(player.morale);
+                const moraleGl  = this._moraleGlyph(player.morale);
+                const moraleLb  = this._moraleLabel(player.morale);
 
                 div.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
@@ -3641,7 +3834,7 @@
                         </div>
                         <div class="player-info" style="flex: 1;">
                             <div class="player-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
-                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span></div>
+                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span> · <span class="morale-arrow" style="color:${moraleCol};" title="${moraleLb} form">${moraleGl}</span></div>
                             <div class="stamina-bar" title="Stamina ${stamPct}%">
                                 <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
                             </div>
@@ -3715,6 +3908,12 @@
 
                 const inIndex = this.playerTeam.bench.findIndex(p => p.id === this.selectedPlayerIn.id);
                 if (inIndex !== -1) this.playerTeam.bench[inIndex] = this.selectedPlayerOut;
+
+                // Reset the outgoing player back to their natural position label, and force the
+                // incoming player into the slot's expected role (with efficiency penalty if they
+                // don't naturally fit).
+                this.selectedPlayerOut.position = this.selectedPlayerOut.naturalPosition || this.selectedPlayerOut.position;
+                this.playerTeam.assignSlotPositions(this.playerFormation);
 
                 if (!this.isPreMatch) {
                     const minute = this.rules.getMatchMinute(this.timeRemaining);

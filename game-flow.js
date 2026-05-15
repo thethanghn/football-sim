@@ -16,6 +16,10 @@ class MatchFlow {
         // Used by _pushMult, _driftTick, _wingerTick to apply individual instructions.
         this._playerInfo = {};
 
+        // When true, the kickoff is being set up / hasn't been taken yet.
+        // Drift / winger / GK ticks are suspended; the simulator also skips events.
+        this._kickoffMode = false;
+
         // Attacker movement mode per team.
         // 'hold' → FWDs hover just behind the defensive line (onside).
         // 'run'  → FWDs are making a timed run past the line (off the ball or through ball).
@@ -42,7 +46,8 @@ class MatchFlow {
         this._idle    = setInterval(() => this._driftTick(),  1900);
         this._winger  = setInterval(() => this._wingerTick(), 950);
         this._gkTimer = setInterval(() => this._gkTick(),    850);
-        setTimeout(() => { this._reshape('player', 900); this._reshape('cpu', 900); }, 250);
+        // Match opens with a kick-off — players go to their halves, then start moving.
+        setTimeout(() => this._doKickoff('player'), 150);
     }
 
     stop() {
@@ -339,6 +344,7 @@ class MatchFlow {
     }
 
     _driftTick() {
+        if (this._kickoffMode) return;
         ['player', 'cpu'].forEach(team => {
             this._outfield(team)
                 .sort(() => Math.random() - 0.5)
@@ -391,6 +397,7 @@ class MatchFlow {
     //   • Off-ball far-side runs → when their team has the ball on the opposite flank, drift
     //     toward the near/far post (a winger arriving at the back stick).
     _wingerTick() {
+        if (this._kickoffMode) return;
         ['player', 'cpu'].forEach(team => {
             const wideIds = this._outfield(team).filter(id => this._isWide(id));
             if (!wideIds.length) return;
@@ -501,6 +508,7 @@ class MatchFlow {
     // ─── GK homing ────────────────────────────────────────────────────────────────
 
     _gkTick() {
+        if (this._kickoffMode) return;
         [[0, 8, 50], [100, 92, 50]].forEach(([id, hx, hy]) => {
             const v = this._vis(id);
             if (!v) return;
@@ -589,7 +597,8 @@ class MatchFlow {
         this._push[team] =  4;
         this._reshape(opp, 1100);
 
-        setTimeout(() => this._doKickoff(), 5200);
+        // Conceding team kicks off
+        setTimeout(() => this._doKickoff(team === 'player' ? 'cpu' : 'player'), 5200);
     }
 
     _evChance({ team, x, y }) {
@@ -1054,8 +1063,12 @@ class MatchFlow {
     }
 
     // ─── Kickoff reset ────────────────────────────────────────────────────────────
+    // Players line up on their own halves, ball sits on the centre spot, all movement
+    // is suspended until the kick is actually taken (~1500 ms later).
 
-    _doKickoff() {
+    _doKickoff(kickoffTeam = 'player') {
+        // Freeze state
+        this._kickoffMode = true;
         ['player', 'cpu'].forEach(t => {
             if (this._fwdRunTimer[t]) { clearTimeout(this._fwdRunTimer[t]); this._fwdRunTimer[t] = null; }
             this._fwdMode[t] = 'hold';
@@ -1063,8 +1076,55 @@ class MatchFlow {
         this._push.player = 0;
         this._push.cpu    = 0;
         this._ballOwner   = null;
+
+        // Position each team in its own half. Two attackers from the kicking team stand
+        // in the centre circle on their own side (the spot + a support).
+        this._positionForKickoff(kickoffTeam);
+
+        // Ball on the centre spot.
         this._animBall(50, 50, 580);
-        this._reshape('player', 950);
-        this._reshape('cpu',    950);
+
+        // After the setup delay, the kick is taken: short pass between the two takers,
+        // and normal movement resumes.
+        setTimeout(() => this._releaseKickoff(kickoffTeam), 1500);
+    }
+
+    _positionForKickoff(kickoffTeam) {
+        // Pick two forwards from the kicking team as the kick-off takers.
+        const takerIds = this._fwdIds(kickoffTeam).slice(0, 2);
+
+        ['player', 'cpu'].forEach(team => {
+            const isPlayer = team === 'player';
+            this._ids(team).forEach(id => {
+                const home = this._home.get(id);
+                const v = this._vis(id);
+                if (!home || !v) return;
+
+                let targetX, targetY;
+                if (takerIds.includes(id)) {
+                    // Centre-circle position for the takers (on their own side of halfway).
+                    const slot = takerIds.indexOf(id);
+                    targetX = isPlayer ? 48 : 52;
+                    targetY = slot === 0 ? 48 : 52;
+                } else {
+                    // Everyone else is clamped to their own half. Preserves their lateral lane.
+                    targetX = isPlayer ? Math.min(48, home.x) : Math.max(52, home.x);
+                    targetY = home.y;
+                }
+                this.anim.animateMove(id, v.pitchX, v.pitchY, targetX, targetY, 700 + Math.random() * 250);
+            });
+        });
+    }
+
+    _releaseKickoff(kickoffTeam) {
+        this._kickoffMode = false;
+        // Two takers play a short pass to start the match
+        const takerIds = this._fwdIds(kickoffTeam).slice(0, 2);
+        if (takerIds.length >= 2) {
+            this._ballTo(takerIds[0], 200);
+            setTimeout(() => this._ballTo(takerIds[1], 320), 250);
+        } else if (takerIds[0] != null) {
+            this._ballTo(takerIds[0], 200);
+        }
     }
 }

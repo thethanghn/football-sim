@@ -45,6 +45,49 @@ class ZoneStrength {
         return sf + (1 - sf) * det * 0.5;
     }
 
+    // PES-style match-day morale multiplier. Applied on top of fatigue.
+    // top ↑ +10 %, good ↗ +5 %, normal → 0 %, poor ↘ −5 %, terrible ↓ −12 %.
+    static moraleMult(player) {
+        return ({
+            top:      1.10,
+            good:     1.05,
+            normal:   1.00,
+            poor:     0.95,
+            terrible: 0.88,
+        })[player.morale] ?? 1.0;
+    }
+
+    // Position families — drives the "same family but not secondary" middle tier.
+    static POSITION_FAMILY = {
+        GK:  'gk',
+        CB:  'centre-back',   CDM: 'centre-back',
+        LB:  'fullback',      RB:  'fullback',
+        LWB: 'fullback',      RWB: 'fullback',
+        CM:  'central-mid',   CAM: 'central-mid',
+        LM:  'wide',          RM:  'wide',
+        LW:  'wide',          RW:  'wide',
+        ST:  'striker',       CF:  'striker',
+    };
+
+    // CM/PES-style out-of-position penalty. Returns 0.50–1.00 based on how well the
+    // player's natural + secondary positions cover the position they're currently playing.
+    static positionMult(player) {
+        const natural = player.naturalPosition;
+        const playing = player.position;
+        if (!natural || !playing || natural === playing) return 1.00;            // 1.00 — natural
+        if ((player.secondaryPositions || []).includes(playing)) return 0.88;    // 0.88 — secondary
+        const fam = ZoneStrength.POSITION_FAMILY;
+        if (fam[natural] && fam[natural] === fam[playing])      return 0.72;     // 0.72 — same family
+        return 0.50;                                                              // 0.50 — different family
+    }
+
+    // Combined per-player multiplier used by all rating computations.
+    static perPlayerMult(player) {
+        return ZoneStrength.fatigueMult(player)
+             * ZoneStrength.moraleMult(player)
+             * ZoneStrength.positionMult(player);
+    }
+
     // ─── 3-band engine ratings ────────────────────────────────────────────────
     static bandRatings(teamObj, formation) {
         if (!teamObj || !teamObj.onField || teamObj.onField.length === 0) {
@@ -54,7 +97,7 @@ class ZoneStrength {
         let atkSum = 0, atkN = 0, midSum = 0, midN = 0, defSum = 0, defN = 0;
 
         teamObj.onField.forEach(p => {
-            const fm = ZoneStrength.fatigueMult(p);
+            const fm = ZoneStrength.perPlayerMult(p);   // fatigue × morale
 
             if (ZoneStrength.ATTACK_POS.includes(p.position)) {
                 const r = ((p.finishing || 50) * 0.30 + (p.offTheBall || 50) * 0.25 +
@@ -111,8 +154,8 @@ class ZoneStrength {
                 const home = homeLookup(idx, isPlayer);
                 if (!home) return;
                 const overall = overallOf(p);
-                const fatigue = Math.max(0.5, (p.stamina || 80) / 100);
-                const contribution = overall * fatigue * scale;
+                const fm = ZoneStrength.perPlayerMult(p);   // fatigue × morale
+                const contribution = overall * fm * scale;
 
                 for (let l = 0; l < lanes; l++) {
                     const cy = (l + 0.5) * laneSize;
