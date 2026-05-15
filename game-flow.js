@@ -279,6 +279,16 @@ class MatchFlow {
         return h && (h.y < 28 || h.y > 72);
     }
 
+    // Wingers: wide AND in the forward third (LW/RW, wide forwards in 343/433/352).
+    // Full-backs and wide mids are wide but not forward, so they don't qualify.
+    _isWinger(id) {
+        const h = this._home.get(id);
+        if (!h) return false;
+        const wide    = h.y < 28 || h.y > 72;
+        const forward = id < 100 ? h.x >= 55 : h.x <= 45;
+        return wide && forward;
+    }
+
     _driftTick() {
         ['player', 'cpu'].forEach(team => {
             this._outfield(team)
@@ -322,10 +332,29 @@ class MatchFlow {
     }
 
     // Dedicated fast tick for wide players (wingers, full-backs) — runs 2× faster than driftTick.
+    // Wingers get a markedly larger movement zone, modulated by attack/defence phase:
+    //   • Attacking  → big lateral runs, push high, cut inside (drift toward Y=50), wider X spread.
+    //   • Defending  → tuck back narrower toward home X/Y.
+    //   • Off-ball far-side runs → when their team has the ball on the opposite flank, drift
+    //     toward the near/far post (a winger arriving at the back stick).
     _wingerTick() {
         ['player', 'cpu'].forEach(team => {
             const wideIds = this._outfield(team).filter(id => this._isWide(id));
             if (!wideIds.length) return;
+
+            // Per-team attacking pressure (-10..+15). Positive = pushing forward.
+            const push       = this._push[team];
+            const attacking  = push > 2;
+            const retreating = push < -2;
+
+            // Where's the ball, in pitch coords? Used for "winger on the far side" runs.
+            let ballX = null, ballY = null;
+            const ballEl = this.pitch?.ballElement;
+            if (ballEl && this.pitch.getPitchCoords) {
+                const c = this.pitch.getPitchCoords(parseFloat(ballEl.getAttribute('cx')),
+                                                   parseFloat(ballEl.getAttribute('cy')));
+                ballX = c.pitchX; ballY = c.pitchY;
+            }
 
             // Move 1–2 wide players per tick to keep movement staggered, not synchronised
             const pick = wideIds.sort(() => Math.random() - 0.5).slice(0, Math.random() < 0.6 ? 1 : 2);
@@ -334,28 +363,76 @@ class MatchFlow {
                 const v = this._vis(id);
                 if (!t || !v) return;
 
-                const lo    = team === 'player' ?  4 : 30;
-                const hi    = team === 'player' ? 70 : 96;
-                const h     = this._home.get(id);
-                const isFwd = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
+                const h        = this._home.get(id);
+                const isFwd    = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
+                const isWinger = this._isWinger(id);
+                // Attacking wingers earn a wider X clamp so they can push into the opponent's box.
+                const wingerAtkClamp = isWinger && push > 2;
+                const lo = wingerAtkClamp ? (team === 'player' ? 20 :  4) : (team === 'player' ?  4 : 30);
+                const hi = wingerAtkClamp ? (team === 'player' ? 96 : 80) : (team === 'player' ? 70 : 96);
 
-                // Wingers: big vertical Y runs plus moderate forward/backward X movement
-                const yRun  = (Math.random() - 0.5) * 22;  // up to ±11 units on pitch
-                const xNudge = (Math.random() - 0.5) * 8;
+                // Decide movement amplitudes by role + phase
+                let yRun, xRun, msBase, msJit;
+                if (isWinger && attacking) {
+                    // Wingers in attack: big runs, push high, big lateral coverage
+                    yRun   = (Math.random() - 0.5) * 38;             // ±19 lateral units
+                    xRun   = team === 'player'
+                                ? 4 + Math.random() * 9              // sprint forward
+                                : -(4 + Math.random() * 9);
+                    msBase = 380; msJit = 320;                       // faster animations
+                } else if (isWinger && retreating) {
+                    // Tucking back to help defend
+                    yRun   = (Math.random() - 0.5) * 12;
+                    xRun   = team === 'player' ? -(2 + Math.random() * 6) : (2 + Math.random() * 6);
+                    msBase = 600; msJit = 400;
+                } else if (isWinger) {
+                    // Neutral phase: still wider than baseline
+                    yRun   = (Math.random() - 0.5) * 26;
+                    xRun   = (Math.random() - 0.5) * 11;
+                    msBase = 480; msJit = 420;
+                } else {
+                    // Non-winger wide players (full-backs, wide mids): original behaviour
+                    yRun   = (Math.random() - 0.5) * 22;
+                    xRun   = (Math.random() - 0.5) * 8;
+                    msBase = 500; msJit = 450;
+                }
+
+                // Compute targets
                 let nx, ny;
 
                 if (isFwd && this._fwdMode[team] === 'hold') {
                     const line = this.getOffsideLine(team);
                     nx = this._clamp(line != null
                         ? (team === 'player' ? line - 0.5 - Math.random() * 5 : line + 0.5 + Math.random() * 5)
-                        : this._onside(id, t.x + xNudge), lo, hi);
+                        : this._onside(id, t.x + xRun), lo, hi);
                     ny = this._clamp(t.y + yRun);
                 } else {
-                    nx = this._clamp(t.x + xNudge, lo, hi);
+                    nx = this._clamp(t.x + xRun, lo, hi);
                     ny = this._clamp(t.y + yRun);
                 }
 
-                const ms = 500 + Math.random() * 450;
+                // Winger flair: cut inside on attacks, or arrive at far post when ball is wide on the other flank
+                if (isWinger && attacking) {
+                    const homeTopHalf = h.y < 50;
+                    const ballOnOppFlank = ballX != null
+                        && (team === 'player' ? ballX >= 50 : ballX <= 50)   // ball in attacking half
+                        && ballY != null
+                        && (homeTopHalf ? ballY > 60 : ballY < 40);
+
+                    if (ballOnOppFlank && Math.random() < 0.55) {
+                        // Far-post run: aim for the back stick zone in the box
+                        const boxX = team === 'player' ? 86 + Math.random() * 8 : 14 - Math.random() * 8;
+                        const postY = homeTopHalf ? 38 + Math.random() * 8 : 54 + Math.random() * 8;
+                        nx = this._clamp(boxX, lo, hi);
+                        ny = this._clamp(postY);
+                    } else if (Math.random() < 0.40) {
+                        // Cut inside: bias Y back toward the centre half-space (~30–40 / 60–70)
+                        const target = homeTopHalf ? 32 + Math.random() * 10 : 58 + Math.random() * 10;
+                        ny = this._clamp(t.y + (target - t.y) * (0.5 + Math.random() * 0.3));
+                    }
+                }
+
+                const ms = msBase + Math.random() * msJit;
                 this.anim.animateMove(id, v.pitchX, v.pitchY, nx, ny, ms);
                 if (id === this._ballOwner) this._animBall(nx, ny, ms * 0.85);
             });
@@ -621,19 +698,24 @@ class MatchFlow {
             this.anim.animateMove(gkId, gkV.pitchX, gkV.pitchY, gkHomeX, gkY, 480);
         }
 
-        // Defenders fill box — near post, middle, far post, edge
+        // Defenders flood the box — defending side outnumbers attackers at corners.
+        // 6-yard line, penalty spot band, and edge-of-box, plus one outlet left outside.
         const defBoxX = team === 'player' ? 91 : 9;
+        const sign = team === 'player' ? -1 : 1;
         const defSpots = [
-            [defBoxX + (team === 'player' ? -3 : 3), cornerY < 50 ? 35 : 65],
-            [gkHomeX + (team === 'player' ? 5 : -5), 50],
-            [defBoxX + (team === 'player' ? -8 : 8), cornerY < 50 ? 58 : 42],
-            [defBoxX + (team === 'player' ? -16 : 16), 44],
-            [defBoxX + (team === 'player' ? -16 : 16), 56],
+            [defBoxX + sign * 3,  cornerY < 50 ? 35 : 65],   // near post
+            [defBoxX + sign * 3,  cornerY < 50 ? 62 : 38],   // far post
+            [gkHomeX - sign * 5,  50],                        // 6-yard middle
+            [defBoxX + sign * 8,  cornerY < 50 ? 42 : 58],   // penalty spot, near side
+            [defBoxX + sign * 8,  50],                        // penalty spot, center
+            [defBoxX + sign * 8,  cornerY < 50 ? 58 : 42],   // penalty spot, far side
+            [defBoxX + sign * 16, 44],                        // edge of box, near
+            [defBoxX + sign * 16, 56],                        // edge of box, far
         ];
         this._outfield(defTeam).slice(0, defSpots.length).forEach((id, i) => {
             const [dx, dy] = defSpots[i];
             this._move(id, this._clamp(dx + (Math.random()-0.5)*4), this._clamp(dy + (Math.random()-0.5)*5),
-                       480 + i * 40);   // max 480+4*40=640ms
+                       450 + i * 30);   // max 450+7*30=660ms, still completes before cross at t=750
         });
 
         // All setup animations ≤ 640ms. At 750ms, deliver the cross and

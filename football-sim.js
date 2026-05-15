@@ -1064,6 +1064,8 @@
                 this._attackPhase = null; // null | 'buildup' | 'progression' | 'danger'
                 this._attackTeam  = null; // 'player' | 'cpu'
                 this._phaseTicks  = 0;
+                this.matchSpeed   = 'fast';   // 'slow' | 'normal' | 'fast' — 'fast' preserves legacy 500ms/1000ms pace
+                this._cpuLastFormationChangeMinute = 0;  // CPU AI cooldown tracker
                 this.rules = new FootballRules();
                 console.log('Creating PitchRenderer...');
                 this.pitchRenderer = new PitchRenderer();
@@ -1111,14 +1113,15 @@
                     const closeManageBtn = document.getElementById('closeManageBtn');
                     if (closeManageBtn) closeManageBtn.addEventListener('click', () => this.closeManagement());
 
-                    const confirmSubBtn = document.getElementById('confirmSubBtn');
-                    if (confirmSubBtn) confirmSubBtn.addEventListener('click', () => this.confirmSubstitution());
-
                     const playAgainBtn = document.getElementById('playAgainBtn');
                     if (playAgainBtn) playAgainBtn.addEventListener('click', () => this.reset());
 
                     document.querySelectorAll('.tactic-btn').forEach(btn => {
                         btn.addEventListener('click', () => this.setTactic(btn.dataset.tactic, btn.dataset.value));
+                    });
+
+                    document.querySelectorAll('.speed-btn').forEach(btn => {
+                        btn.addEventListener('click', () => this.setMatchSpeed(btn.dataset.speed));
                     });
 
                     // Render management panel now that team is initialized
@@ -1163,19 +1166,87 @@
                 this.teamInstruction = mentMap[this.tactics.mentality] || 'neutral';
             }
 
-            showPlayerDetail(player) {
-                const isMobile = window.matchMedia('(max-width: 640px)').matches;
-                const panel = document.getElementById(isMobile ? 'mobilePlayerDetail' : 'playerDetailPanel');
-                const avatar = AvatarGenerator.createSVG(player.avatar, 80);
+            // Tiered colour scale for an overall rating (0–100):
+            // red → yellow → grey → light green → dark green → purple
+            _overallColor(score) {
+                if (score >= 90) return '#C084FC'; // purple — legendary
+                if (score >= 80) return '#16A34A'; // dark green — great
+                if (score >= 70) return '#86EFAC'; // light green — good
+                if (score >= 60) return '#A0A0A0'; // grey — average
+                if (score >= 50) return '#FACC15'; // yellow — poor
+                return '#EF4444';                  // red — terrible
+            }
 
-                panel.innerHTML = `
-                    <div class="player-detail-header" style="margin-bottom: 15px;">
+            // Compute a goalkeeper jersey colour from the outfield kit with maximum contrast.
+            //   1. Convert team RGB → HSL.
+            //   2. Rotate hue 180° (complementary).
+            //   3. Avoid the pitch's green band [90°,150°] by shifting +60° if needed.
+            //   4. Push saturation high so the kit pops against grass.
+            //   5. Invert lightness — dark team → bright GK kit, light team → dark GK kit.
+            _gkJerseyColor(teamHex) {
+                if (!teamHex || teamHex.charAt(0) !== '#') return '#FFD700';
+                const r = parseInt(teamHex.slice(1,3),16) / 255;
+                const g = parseInt(teamHex.slice(3,5),16) / 255;
+                const b = parseInt(teamHex.slice(5,7),16) / 255;
+
+                // RGB → HSL
+                const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+                let h = 0, s = 0, l = (max + min) / 2;
+                if (d !== 0) {
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    if      (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+                    else if (max === g) h = ((b - r) / d + 2);
+                    else                h = ((r - g) / d + 4);
+                    h *= 60;
+                }
+
+                // Derive GK HSL
+                let gkH = (h + 180) % 360;
+                if (gkH >= 90 && gkH <= 150) gkH = (gkH + 60) % 360;  // dodge pitch green
+                const gkS = Math.max(0.85, s);
+                const gkL = l < 0.55 ? 0.72 : 0.28;
+
+                // HSL → RGB
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1; if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                const q = gkL < 0.5 ? gkL * (1 + gkS) : gkL + gkS - gkL * gkS;
+                const p = 2 * gkL - q;
+                const hh = gkH / 360;
+                const rr = hue2rgb(p, q, hh + 1/3);
+                const gg = hue2rgb(p, q, hh);
+                const bb = hue2rgb(p, q, hh - 1/3);
+
+                const toHex = v => Math.round(v * 255).toString(16).padStart(2, '0');
+                return '#' + toHex(rr) + toHex(gg) + toHex(bb);
+            }
+
+            // Resolve which jersey colour a player should wear — GKs get a contrasting kit.
+            _jerseyFor(player, teamColor) {
+                return player.position === 'GK' ? this._gkJerseyColor(teamColor) : teamColor;
+            }
+
+            showPlayerDetail(player) {
+                const overlay = document.getElementById('playerDetailOverlay');
+                const content = document.getElementById('playerDetailOverlayContent');
+                if (!overlay || !content) return;
+
+                const avatar   = AvatarGenerator.createSVG(player.avatar, 80, this._jerseyFor(player, this.playerTeam?.jerseyColor));
+                const ovr      = this.calculateOverall(player);
+                const ovrColor = this._overallColor(ovr);
+
+                content.innerHTML = `
+                    <div class="player-detail-header">
                         <div style="flex-shrink: 0; margin-right: 15px;">
                             ${avatar}
                         </div>
                         <div class="player-detail-info">
                             <div class="player-detail-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
-                            <div class="player-detail-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} <span style="font-size:1.1em;font-weight:bold;color:#FFD700;">${this.calculateOverall(player)}</span></div>
+                            <div class="player-detail-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} <span style="font-size:1.1em;font-weight:bold;color:${ovrColor};">${ovr}</span></div>
                             <div class="player-detail-number">#${player.number}</div>
                         </div>
                     </div>
@@ -1183,17 +1254,19 @@
                         <svg id="radarChart" width="200" height="200" viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg"></svg>
                     </div>
                     <div class="attribute-bars" id="attributeBars"></div>
-                    <button class="close-detail-btn" id="closeDetailBtn">Close Details</button>
                 `;
 
                 this.createRadarChart(player);
                 this.createAttributeBars(player);
 
-                document.getElementById('closeDetailBtn').onclick = () => {
-                    panel.innerHTML = isMobile
-                        ? ''
-                        : '<div style="text-align: center; color: #FFD700; padding: 20px; font-weight: bold;">Tap a player to view details</div>';
-                };
+                overlay.style.display = 'block';
+                overlay.scrollTop = 0;
+
+                // Wire the close button (it's static markup, but bind every open so a fresh handler is safe)
+                const closeBtn = document.getElementById('playerDetailCloseX');
+                if (closeBtn) {
+                    closeBtn.onclick = () => { overlay.style.display = 'none'; };
+                }
             }
 
             createRadarChart(player) {
@@ -1296,35 +1369,63 @@
                 const container = document.getElementById('attributeBars');
                 container.innerHTML = '';
 
-                const isGK = player.position === 'GK';
-                const attrs = [
-                    { name: 'Stamina', key: 'stamina' },
-                    { name: 'Strength', key: 'strength' },
-                    { name: 'Speed', key: 'speed' },
-                    { name: 'Shooting', key: 'shooting' },
-                    { name: 'Passing', key: 'passing' },
-                    { name: isGK ? 'Reflex' : 'Heading', key: 'heading' },
-                    { name: isGK ? 'Goalkeeping' : 'Tackling', key: 'tackling' },
-                    { name: 'Offensive', key: 'offensive' },
-                    { name: 'Defensive', key: 'defensive' }
+                // CM 03/04-style attributes, grouped. `influence` and `luck` are hidden and intentionally omitted.
+                const groups = [
+                    { title: 'Physical', attrs: [
+                        { name: 'Pace',          key: 'pace' },
+                        { name: 'Stamina',       key: 'stamina' },
+                        { name: 'Strength',      key: 'strength' },
+                    ]},
+                    { title: 'Mental', attrs: [
+                        { name: 'Composure',     key: 'composure' },
+                        { name: 'Determination', key: 'determination' },
+                        { name: 'Anticipation',  key: 'anticipation' },
+                        { name: 'Vision',        key: 'vision' },
+                        { name: 'Creativity',    key: 'creativity' },
+                        { name: 'Off The Ball',  key: 'offTheBall' },
+                        { name: 'Positioning',   key: 'positioning' },
+                    ]},
+                    { title: 'Technical', attrs: [
+                        { name: 'Finishing',     key: 'finishing' },
+                        { name: 'Passing',       key: 'passing' },
+                        { name: 'Dribbling',     key: 'dribbling' },
+                        { name: 'Crossing',      key: 'crossing' },
+                        { name: 'Heading',       key: 'heading' },
+                        { name: 'Tackling',      key: 'tackling' },
+                        { name: 'Marking',       key: 'marking' },
+                    ]},
+                    { title: 'Goalkeeping', attrs: [
+                        { name: 'Reflexes',      key: 'reflexes' },
+                        { name: 'Handling',      key: 'handling' },
+                    ]},
                 ];
 
-                attrs.forEach(attr => {
-                    const value = Math.min(100, player[attr.key]);
-                    const barColor = value < 50 ? 'linear-gradient(90deg,#aa0000,#ff3333)'
-                                   : value < 70 ? 'linear-gradient(90deg,#aa6600,#ffaa00)'
-                                   : value < 85 ? 'linear-gradient(90deg,#aaaa00,#dddd00)'
-                                   :              'linear-gradient(90deg,#00aa00,#00ff00)';
-                    const div = document.createElement('div');
-                    div.className = 'attribute-bar';
-                    div.innerHTML = `
-                        <div class="attribute-label">${attr.name}</div>
-                        <div class="attribute-value">${Math.round(value)}</div>
-                        <div class="attribute-bar-bg">
-                            <div class="attribute-bar-fill" style="width:${value}%;background:${barColor}"></div>
-                        </div>
-                    `;
-                    container.appendChild(div);
+                groups.forEach(group => {
+                    const header = document.createElement('div');
+                    header.className = 'attribute-group-title';
+                    header.style.cssText = 'grid-column: 1 / -1; color: var(--c-gold); font-weight: 700; font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; margin: 6px 0 2px; border-bottom: 1px solid var(--c-border-gold); padding-bottom: 2px;';
+                    header.textContent = group.title;
+                    container.appendChild(header);
+
+                    group.attrs.forEach(attr => {
+                        const raw = player[attr.key];
+                        if (raw == null) return;
+                        const value = Math.min(100, raw);
+                        const barColor = value < 50 ? 'linear-gradient(90deg,#aa0000,#ff3333)'
+                                       : value < 70 ? 'linear-gradient(90deg,#aa6600,#ffaa00)'
+                                       : value < 85 ? 'linear-gradient(90deg,#aaaa00,#dddd00)'
+                                       :              'linear-gradient(90deg,#00aa00,#00ff00)';
+                        const div = document.createElement('div');
+                        div.className = 'attribute-bar';
+                        div.innerHTML = `
+                            <div class="attribute-label">${attr.name}</div>
+                            <div class="attribute-value">${Math.round(value)}</div>
+                            <div class="attribute-bar-bg">
+                                <div class="attribute-bar-fill" style="width:${value}%;background:${barColor}"></div>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
                 });
             }
 
@@ -1443,7 +1544,8 @@
                     this.playerTeam.onField.forEach((player, idx) => {
                         if (idx < playerPositions.length) {
                             const pos = playerPositions[idx];
-                            this.pitchRenderer.renderPlayer(idx, pos.x, pos.y, player.number, this.playerTeam.jerseyColor, player.name);
+                            const kit = this._jerseyFor(player, this.playerTeam.jerseyColor);
+                            this.pitchRenderer.renderPlayer(idx, pos.x, pos.y, player.number, kit, player.name);
                         }
                     });
                     console.log('Player team rendered');
@@ -1452,7 +1554,8 @@
                     this.cpuTeam.onField.forEach((player, idx) => {
                         if (idx < cpuPositions.length) {
                             const pos = cpuPositions[idx];
-                            this.pitchRenderer.renderPlayer(idx + 100, pos.x, pos.y, player.number, this.cpuTeam.jerseyColor, player.name);
+                            const kit = this._jerseyFor(player, this.cpuTeam.jerseyColor);
+                            this.pitchRenderer.renderPlayer(idx + 100, pos.x, pos.y, player.number, kit, player.name);
                         }
                     });
                     console.log('CPU team rendered');
@@ -1477,6 +1580,74 @@
                 return formations[Math.floor(Math.random() * formations.length)];
             }
 
+            // ─── CPU manager AI: reactively change formation based on match state ───
+            _evaluateCpuFormation() {
+                if (!this.isRunning || this.isPaused || !this.cpuFormation || !this.matchFlow) return;
+
+                const minute     = this.rules.getMatchMinute(this.timeRemaining);
+                const sinceLast  = minute - this._cpuLastFormationChangeMinute;
+                if (this._cpuLastFormationChangeMinute > 0 && sinceLast < 12) return; // 12-min cooldown
+                if (minute < 15) return; // don't react before 15 minutes
+                if (minute > 88) return; // too late to bother
+
+                const scoreDiff = this.cpuScore - this.playerScore;   // + = CPU leading
+                const minLeft   = 90 - minute;
+                const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+                let target = null, reason = '';
+
+                if (scoreDiff <= -2 && minLeft <= 35) {
+                    target = pick(['343', '433']);             reason = 'chasing the game';
+                } else if (scoreDiff === -1 && minLeft <= 25) {
+                    target = pick(['433', '352', '343']);      reason = 'pushing for the equaliser';
+                } else if (scoreDiff >= 2 && minLeft <= 30) {
+                    target = pick(['541', '532']);             reason = 'parking the bus';
+                } else if (scoreDiff === 1 && minLeft <= 18) {
+                    target = pick(['451', '532']);             reason = 'protecting the lead';
+                } else if (scoreDiff === 0) {
+                    // Tied: react to midfield imbalance, but only after the hour mark
+                    if (minute < 60) return;
+                    const pZones = this.getZoneRatings(this.playerTeam, this.playerFormation);
+                    const cZones = this.getZoneRatings(this.cpuTeam,    this.cpuFormation);
+                    if (cZones.midfield < pZones.midfield - 8) {
+                        target = pick(['451', '352']);         reason = 'losing the midfield battle';
+                    } else if (cZones.attack < pZones.defense - 10) {
+                        target = pick(['433', '352']);         reason = 'searching for a winner';
+                    }
+                }
+
+                // Avoid switching to the current formation
+                if (!target || target === this.cpuFormation) return;
+
+                this.changeCpuFormation(target, reason);
+                this._cpuLastFormationChangeMinute = minute;
+            }
+
+            changeCpuFormation(newFormation, reason = 'tactical change') {
+                const oldFormation = this.cpuFormation;
+                this.cpuFormation = newFormation;
+
+                // Recompute and animate CPU players to their new home positions.
+                // Only update CPU side of matchFlow._home so player team is untouched.
+                if (this.matchFlow && this.pitchRenderer) {
+                    try {
+                        const formCpu = [1, ...newFormation.split('').map(Number)];
+                        const cpuPositions = this.pitchRenderer.calculatePositions(formCpu, 2);
+                        cpuPositions.forEach((p, i) => this.matchFlow._home.set(100 + i, { x: p.x, y: p.y }));
+                        setTimeout(() => this.matchFlow._reshape('cpu', 900), 100);
+                    } catch (e) {
+                        console.warn('CPU formation reshape failed:', e);
+                    }
+                }
+
+                const minute = this.rules.getMatchMinute(this.timeRemaining);
+                const fmt = f => f.split('').join('-');
+                this.addEvent(
+                    `📋 CPU MANAGER (${minute}'): ${fmt(oldFormation)} → ${fmt(newFormation)} (${reason})`,
+                    'card', 'cpu'
+                );
+            }
+
             switchScreen(screenId) {
                 document.querySelectorAll('.screen').forEach(s => {
                     s.classList.remove('active');
@@ -1492,26 +1663,41 @@
             }
 
             runMatch() {
-                const eventInterval = setInterval(() => {
-                    if (!this.isPaused && this.isRunning) {
+                // Recursive setTimeout so changes to matchSpeed take effect on the next tick.
+                const mult = () => ({ slow: 3, normal: 2, fast: 1 }[this.matchSpeed] || 1);
+
+                const tickEvent = () => {
+                    if (!this.isRunning) return;
+                    if (!this.isPaused) {
                         this.generateEvent();
                         this.updateStats();
                         this.updateUI();
                     }
-                }, 500);
-
-                const timerInterval = setInterval(() => {
-                    if (!this.isPaused && this.isRunning) {
+                    setTimeout(tickEvent, 500 * mult());
+                };
+                const tickTimer = () => {
+                    if (!this.isRunning) return;
+                    if (!this.isPaused) {
                         this.timeRemaining--;
                         this.updateUI();
-
                         if (this.timeRemaining <= 0) {
-                            clearInterval(eventInterval);
-                            clearInterval(timerInterval);
+                            this.isRunning = false;
                             this.endMatch();
+                            return;
                         }
                     }
-                }, 1000);
+                    setTimeout(tickTimer, 1000 * mult());
+                };
+                setTimeout(tickEvent, 500 * mult());
+                setTimeout(tickTimer, 1000 * mult());
+            }
+
+            setMatchSpeed(speed) {
+                if (!['slow', 'normal', 'fast'].includes(speed)) return;
+                this.matchSpeed = speed;
+                document.querySelectorAll('.speed-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.speed === speed);
+                });
             }
 
             // CM 03/04-style zone ratings: weighted attribute averages per zone
@@ -1576,6 +1762,16 @@
                 if (this.timeRemaining < 45 && Math.random() < 0.02) {
                     this._attackPhase = null; this.injuryEvent(); return;
                 }
+
+                // Flavor events: atmosphere, weather, oddities. Don't reset attack phase.
+                const fr = Math.random();
+                if (fr < 0.006)       { this.streakerEvent();       return; }
+                else if (fr < 0.012)  { this.pitchInvaderEvent();   return; }
+                else if (fr < 0.020)  { this.floodlightEvent();     return; }
+                else if (fr < 0.030)  { this.weatherEvent();        return; }
+                else if (fr < 0.045)  { this.ballBoyEvent();        return; }
+                else if (fr < 0.065)  { this.crowdChantEvent();     return; }
+                else if (fr < 0.080)  { this.managerArguesEvent(Math.random() < 0.5 ? 'player' : 'cpu'); return; }
 
                 if (!this._attackPhase)                    this._beginPossession();
                 else if (this._attackPhase === 'buildup')  this._doBuildup();
@@ -1642,7 +1838,9 @@
                 const turnoverChance = (defZones.midfield / 100) * pressMod * 0.18;
 
                 if (Math.random() < turnoverChance) {
-                    this.tackleEvent(opp);   // defense presses and wins the ball
+                    // Sometimes a defensive header wins the duel instead of a tackle
+                    if (Math.random() < 0.30) this.headerEvent(opp, false);
+                    else                     this.tackleEvent(opp);
                     this._attackTeam  = opp;
                     this._attackPhase = 'buildup';
                     this._phaseTicks  = 0;
@@ -1653,6 +1851,12 @@
                 if (Math.random() < 0.06) {
                     this.throwInEvent(team);
                     return; // Stay in buildup, same tick count
+                }
+
+                // Buildup occasionally starts from a goal kick
+                if (this._phaseTicks === 1 && Math.random() < 0.10) {
+                    this.goalKickEvent(team);
+                    return;
                 }
 
                 // How many buildup passes before pushing forward (tactic-driven)
@@ -1685,7 +1889,13 @@
                 const r = Math.random();
 
                 if (r < interceptionChance) {
-                    if (r < interceptionChance * 0.65) {
+                    if (r < interceptionChance * 0.40) {
+                        // Defense sprung the offside trap
+                        this.offsideTrapEvent(opp);
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                    } else if (r < interceptionChance * 0.75) {
                         // Defense wins ball cleanly in the final third
                         this.tackleEvent(opp);
                         this._attackTeam  = opp;
@@ -1701,6 +1911,21 @@
                     return;
                 }
 
+                // Speculative long shot from outside the box — ends the attack
+                if (Math.random() < 0.08) {
+                    this.longShotEvent(team);
+                    this._attackPhase = null;
+                    this._attackTeam  = null;
+                    this._phaseTicks  = 0;
+                    return;
+                }
+
+                // Mazy dribble past defenders — pushes attack on if successful
+                if (Math.random() < 0.10) {
+                    this.dribbleEvent(team);
+                    return; // stay in progression
+                }
+
                 // How long to build in the final third before forcing a shot
                 const menMod = team === 'player'
                     ? ({ 'gung-ho': 0, 'attacking': 0, 'normal': 1, 'defensive': 2, 'ultra-def': 2 }[this.tactics.mentality] ?? 1)
@@ -1711,7 +1936,9 @@
                 const maxProg = menMod + pasMod; // 0–3
 
                 if (this._phaseTicks > maxProg) {
-                    this.passEvent(team);        // final ball into the danger zone
+                    // 25% of final balls are a defence-splitting through ball
+                    if (Math.random() < 0.25) this.throughBallEvent(team);
+                    else                      this.passEvent(team);
                     this._attackPhase = 'danger';
                     this._phaseTicks  = 0;
                 } else {
@@ -1750,6 +1977,16 @@
                 const attackScore = effAtk / (effAtk + effDef + 0.01);
 
                 const r2 = Math.random();
+
+                // Rare specials inside the danger phase — short-circuit the normal table
+                if (Math.random() < 0.04) { this.penaltyEvent(team);         return; }
+                if (Math.random() < 0.05) { this.freeKickEvent(team);        return; }
+                if (Math.random() < 0.06 && attackScore > 0.50) { this.oneOnOneEvent(team);   return; }
+                if (Math.random() < 0.05)                       { this.headerEvent(team, true); return; }
+                if (Math.random() < 0.04)                       { this.goalmouthScrambleEvent(team); return; }
+                if (Math.random() < 0.015 && attackScore > 0.55) { this.spectacularEvent(team); return; }
+                if (Math.random() < 0.012)                      { this.ownGoalEvent(team);    return; }
+                if (Math.random() < 0.020)                      { this.goalDisallowedEvent(team); return; }
 
                 if (attackScore > 0.62) {
                     if (r2 < 0.28)       this.goalEvent(team);
@@ -2167,6 +2404,283 @@
                 }
             }
 
+            // ─── CM 01/02-style additional events ─────────────────────────────────────
+
+            penaltyEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
+                if (teamObj.onField.length === 0) return;
+
+                const minute = this.rules.getMatchMinute(this.timeRemaining);
+                const fouler = defTeamObj.getRandomPlayer(true);
+                this.addEvent(`⚖️ PENALTY (${minute}')! <b class="ev-name">${fouler.name}</b> brings down the attacker in the box!`, 'card', team);
+
+                // Penalty taker: prefer composed forward
+                const candidates = teamObj.onField.filter(p => ['ST','CF','CAM','LW','RW'].includes(p.position));
+                const taker = (candidates.length ? candidates : teamObj.onField)
+                    .slice().sort((a,b) => (b.composure||60) - (a.composure||60))[0] || teamObj.getRandomPlayer(true);
+
+                const gk = defTeamObj.onField.find(p => p.position === 'GK');
+                const finish = ((taker.finishing || 70) * 0.5 + (taker.composure || 70) * 0.5) / 100;
+                const save   = gk ? ((gk.reflexes || 70) * 0.5 + (gk.anticipation || 70) * 0.5) / 100 : 0.55;
+                const goalP  = Math.max(0.45, Math.min(0.88, 0.72 + (finish - save) * 0.4));
+                const r = Math.random();
+
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+
+                if (r < goalP) {
+                    if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 18); }
+                    else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
+                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> coolly slots home the penalty!`, 'goal', team);
+                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this.showCelebration(taker, team);
+                } else if (r < goalP + (1 - goalP) * 0.55 && gk) {
+                    this.addEvent(`🧤 SAVED! <b class="ev-name">${gk.name}</b> dives to push the penalty away!`, 'save', team === 'player' ? 'cpu' : 'player');
+                    if (this.matchFlow) this.matchFlow.onEvent('save', { team: team === 'player' ? 'cpu' : 'player' });
+                } else {
+                    this.addEvent(`❌ <b class="ev-name">${taker.name}</b> blazes the penalty over the bar!`, 'chance', team);
+                }
+            }
+
+            freeKickEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
+                if (teamObj.onField.length === 0) return;
+
+                // Specialist: highest finishing + crossing among onfield
+                const taker = teamObj.onField.slice().sort((a,b) =>
+                    ((b.finishing||0) + (b.crossing||0)) - ((a.finishing||0) + (a.crossing||0))
+                )[0] || teamObj.getRandomPlayer(true);
+
+                const gk = defTeamObj.onField.find(p => p.position === 'GK');
+                this.addEvent(`📐 Dangerous free kick — <b class="ev-name">${taker.name}</b> stands over it...`, 'pass', team);
+
+                const skill = ((taker.finishing || 60) + (taker.crossing || 60)) / 2 / 100;
+                const r = Math.random();
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+
+                if (r < skill * 0.18) {
+                    // Direct free kick goal
+                    const minute = this.rules.getMatchMinute(this.timeRemaining);
+                    if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 16); }
+                    else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 12); }
+                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> curls a stunning free kick into the top corner!`, 'goal', team);
+                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this.showCelebration(taker, team);
+                } else if (r < 0.32) {
+                    this.addEvent(`🧱 The wall blocks <b class="ev-name">${taker.name}</b>'s effort!`, 'save', team);
+                } else if (r < 0.55) {
+                    this.addEvent(`🧤 <b class="ev-name">${gk?.name || 'The keeper'}</b> tips it over for a corner!`, 'save', team === 'player' ? 'cpu' : 'player');
+                    this.cornerEvent(team);
+                } else {
+                    this.addEvent(`❌ <b class="ev-name">${taker.name}</b> launches the free kick high over the bar`, 'chance', team);
+                }
+            }
+
+            longShotEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
+                // Midfielders take long shots more often
+                const mids = teamObj.onField.filter(p => ['CM','CAM','CDM','LM','RM'].includes(p.position));
+                const shooter = mids.length ? mids[Math.floor(Math.random() * mids.length)] : teamObj.getRandomPlayer(true);
+                const gk = defTeamObj.onField.find(p => p.position === 'GK');
+
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+
+                const skill = ((shooter.finishing || 55) + (shooter.composure || 60)) / 200;
+                const r = Math.random();
+                if (r < skill * 0.22) {
+                    const minute = this.rules.getMatchMinute(this.timeRemaining);
+                    if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
+                    else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 10); }
+                    this.goals.push({ team, scorer: shooter.name, assister: null, time: `${minute}'` });
+                    this.addEvent(`⚽ SCREAMER! <b class="ev-name">${shooter.name}</b> lets fly from 25 yards — top bins!`, 'goal', team);
+                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this.showCelebration(shooter, team);
+                } else if (r < 0.55) {
+                    this.addEvent(`🧤 <b class="ev-name">${shooter.name}</b>'s long-range effort is gathered by <b class="ev-name">${gk?.name || 'the keeper'}</b>`, 'save', team === 'player' ? 'cpu' : 'player');
+                } else if (r < 0.75) {
+                    this.addEvent(`❌ <b class="ev-name">${shooter.name}</b> drags the long shot wide`, 'chance', team);
+                } else {
+                    this.addEvent(`💨 <b class="ev-name">${shooter.name}</b> tries his luck from distance — sails over the crossbar`, 'chance', team);
+                }
+            }
+
+            headerEvent(team, attacking = true) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                if (teamObj.onField.length === 0) return;
+                if (attacking) {
+                    const tall = teamObj.onField.filter(p => ['ST','CF','CB','CAM'].includes(p.position));
+                    const headerer = tall.length ? tall[Math.floor(Math.random() * tall.length)] : teamObj.getRandomPlayer(true);
+                    const r = Math.random();
+                    const head = (headerer.heading || 60) / 100;
+                    if (r < head * 0.25) {
+                        this.goalEvent(team);   // headed goal resolves via standard goal flow
+                    } else if (r < 0.55) {
+                        this.addEvent(`🧤 <b class="ev-name">${headerer.name}</b>'s header is well saved!`, 'save', team === 'player' ? 'cpu' : 'player');
+                    } else {
+                        this.addEvent(`💢 <b class="ev-name">${headerer.name}</b> rises but heads it over!`, 'chance', team);
+                    }
+                } else {
+                    const cbs = teamObj.onField.filter(p => ['CB','CDM'].includes(p.position));
+                    const clearer = cbs.length ? cbs[Math.floor(Math.random() * cbs.length)] : teamObj.getRandomPlayer(true);
+                    this.addEvent(`🛡️ <b class="ev-name">${clearer.name}</b> wins the aerial duel and clears!`, 'tackle', team);
+                }
+            }
+
+            throughBallEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const playmakers = teamObj.onField.filter(p => ['CAM','CM','LW','RW'].includes(p.position));
+                const passer = playmakers.length ? playmakers[Math.floor(Math.random() * playmakers.length)] : teamObj.getRandomPlayer(true);
+                const runners  = teamObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position) && p.id !== passer.id);
+                const receiver = runners.length ? runners[Math.floor(Math.random() * runners.length)] : teamObj.getRandomPlayer(true);
+                this.addEvent(`✨ <b class="ev-name">${passer.name}</b> slides a perfect through ball to <b class="ev-name">${receiver.name}</b>!`, 'pass', team);
+                if (this.matchFlow) this.matchFlow.onEvent('pass', { team });
+            }
+
+            dribbleEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const wingers = teamObj.onField.filter(p => ['LW','RW','CAM','ST','CF'].includes(p.position));
+                const dribbler = wingers.length ? wingers[Math.floor(Math.random() * wingers.length)] : teamObj.getRandomPlayer(true);
+                const drib = (dribbler.dribbling || 60) / 100;
+                if (Math.random() < drib * 0.7) {
+                    this.addEvent(`🏃 <b class="ev-name">${dribbler.name}</b> dances past two defenders!`, 'pass', team);
+                } else {
+                    this.addEvent(`🛡️ <b class="ev-name">${dribbler.name}</b> tries to take on the defence but loses it`, 'tackle', team === 'player' ? 'cpu' : 'player');
+                }
+            }
+
+            oneOnOneEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
+                const fwds = teamObj.onField.filter(p => ['ST','CF','LW','RW','CAM'].includes(p.position));
+                const striker = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : teamObj.getRandomPlayer(true);
+                const gk = defTeamObj.onField.find(p => p.position === 'GK');
+
+                this.addEvent(`🎯 <b class="ev-name">${striker.name}</b> is clean through, one-on-one with the keeper!`, 'chance', team);
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+
+                const composure = (striker.composure || 70) / 100;
+                const gkRating  = gk ? ((gk.reflexes || 70) + (gk.positioning || 70)) / 200 : 0.6;
+                const goalP = Math.max(0.3, Math.min(0.78, 0.55 + (composure - gkRating) * 0.6));
+
+                if (Math.random() < goalP) {
+                    this.goalEvent(team);
+                } else {
+                    this.addEvent(`🧤 <b class="ev-name">${gk?.name || 'The keeper'}</b> stands tall and smothers it!`, 'save', team === 'player' ? 'cpu' : 'player');
+                }
+            }
+
+            ownGoalEvent(team) {
+                // `team` benefits; the own goal is scored by a defender on the opposing team
+                const benefits = team;
+                const losing = team === 'player' ? this.cpuTeam : this.playerTeam;
+                const defs = losing.onField.filter(p => ['CB','LB','RB','LWB','RWB'].includes(p.position));
+                const culprit = defs.length ? defs[Math.floor(Math.random() * defs.length)] : losing.getRandomPlayer(true);
+                if (!culprit) return;
+
+                const minute = this.rules.getMatchMinute(this.timeRemaining);
+                if (benefits === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
+                else                       { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
+                this.goals.push({ team: benefits, scorer: `${culprit.name} (OG)`, assister: null, time: `${minute}'` });
+                this.addEvent(`😱 OWN GOAL (${minute}')! <b class="ev-name">${culprit.name}</b> turns the ball into his own net!`, 'goal', benefits);
+                if (this.matchFlow) this.matchFlow.onEvent('goal', { team: benefits });
+            }
+
+            goalDisallowedEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const scorer = teamObj.getRandomPlayer(true);
+                const reason = Math.random() < 0.6 ? 'offside' : 'foul in the build-up';
+                this.addEvent(`🚫 GOAL DISALLOWED — <b class="ev-name">${scorer.name}</b>'s effort ruled out for ${reason}!`, 'card', team);
+                if (this.matchFlow) this.matchFlow.onEvent('offside', { team });
+            }
+
+            spectacularEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
+                const fwds = teamObj.onField.filter(p => ['ST','CF','CAM','LW','RW'].includes(p.position));
+                const acrobat = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : teamObj.getRandomPlayer(true);
+                const gk = defTeamObj.onField.find(p => p.position === 'GK');
+
+                const moves = ['acrobatic volley', 'bicycle kick', 'overhead kick', 'diving header'];
+                const move  = moves[Math.floor(Math.random() * moves.length)];
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+
+                const skill = ((acrobat.finishing || 65) + (acrobat.composure || 65) + (acrobat.luck || 50)) / 300;
+                if (Math.random() < skill * 0.35) {
+                    const minute = this.rules.getMatchMinute(this.timeRemaining);
+                    if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 22); }
+                    else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 16); }
+                    this.goals.push({ team, scorer: acrobat.name, assister: null, time: `${minute}'` });
+                    this.addEvent(`🤸 WONDER GOAL — <b class="ev-name">${acrobat.name}</b> with an outrageous ${move}!`, 'goal', team);
+                    if (this.matchFlow) this.matchFlow.onEvent('goal', { team });
+                    this.showCelebration(acrobat, team);
+                } else {
+                    this.addEvent(`🤸 <b class="ev-name">${acrobat.name}</b> attempts an audacious ${move} — ${gk?.name || 'the keeper'} watches it sail wide!`, 'chance', team);
+                }
+            }
+
+            goalKickEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const gk = teamObj.onField.find(p => p.position === 'GK');
+                if (!gk) return;
+                this.addEvent(`🥅 Goal kick — <b class="ev-name">${gk.name}</b> launches it long`, 'pass', team);
+            }
+
+            offsideTrapEvent(team) {
+                // `team` is the defending team that sprung the trap
+                const attTeam = team === 'player' ? 'cpu' : 'player';
+                const attObj  = attTeam === 'player' ? this.playerTeam : this.cpuTeam;
+                const fwds    = attObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position));
+                const caught  = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : attObj.getRandomPlayer(true);
+                this.addEvent(`🚩 Offside! <b class="ev-name">${caught.name}</b> is caught the wrong side of the last defender`, 'pass', attTeam);
+                if (this.matchFlow) this.matchFlow.onEvent('offside', { team: attTeam });
+            }
+
+            goalmouthScrambleEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const p1 = teamObj.getRandomPlayer(true);
+                this.addEvent(`💥 Goalmouth scramble! <b class="ev-name">${p1?.name || 'A player'}</b> goes close as bodies fly in the six-yard box!`, 'chance', team);
+                if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
+            }
+
+            // ─── Flavor events (no possession change, atmosphere) ────────────────────
+
+            streakerEvent() {
+                this.addEvent(`🩲 A streaker has invaded the pitch! Stewards give chase as the players look on bemused...`, 'card');
+            }
+            pitchInvaderEvent() {
+                this.addEvent(`👤 An over-excited supporter rushes onto the pitch! Play is briefly halted.`, 'card');
+            }
+            crowdChantEvent() {
+                const chants = [
+                    'The home end is in full voice!',
+                    'The away fans are belting out their anthem.',
+                    '"Olé! Olé! Olé!" rings around the stadium.',
+                    'The crowd whistles every touch from the visitors.',
+                ];
+                this.addEvent(`📣 ${chants[Math.floor(Math.random() * chants.length)]}`, 'pass');
+            }
+            weatherEvent() {
+                const w = ['☔ Rain begins to lash down — the pitch is getting slick.',
+                           '🌫️ A thick fog rolls in across the stadium.',
+                           '🌬️ A swirling wind is making life hard for the goalkeepers.',
+                           '❄️ Light snow flurries are blowing across the pitch.'];
+                this.addEvent(w[Math.floor(Math.random() * w.length)], 'pass');
+            }
+            floodlightEvent() {
+                this.addEvent(`💡 One of the floodlights flickers — brief delay as the officials check it.`, 'card');
+            }
+            managerArguesEvent(team) {
+                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                this.addEvent(`📋 The ${teamObj?.clubName || 'manager'} boss is raging at the fourth official on the touchline!`, 'card', team);
+            }
+            ballBoyEvent() {
+                this.addEvent(`👦 A ball boy holds onto the ball just a touch too long — words exchanged!`, 'pass');
+            }
+
             updatePossession() {
                 this.stats.cpuPossession = 100 - this.stats.playerPossession;
             }
@@ -2187,6 +2701,9 @@
 
                 // Momentum drifts slowly back to 50 (regression)
                 this.momentum += (50 - this.momentum) * 0.02;
+
+                // CPU manager reviews tactics periodically (sampled to avoid every-tick cost)
+                if (Math.random() < 0.15) this._evaluateCpuFormation();
             }
 
             updateUI() {
@@ -2301,26 +2818,39 @@
                         const lastName  = p.name.trim().split(/\s+/).pop();
                         const ovr       = this.calculateOverall(p);
                         const sel       = this.selectedPlayerOut?.id === p.id;
-                        const avatarSVG = AvatarGenerator.createSVG(p.avatar, 34);
+                        const avatarSVG = AvatarGenerator.createSVG(p.avatar, 34, this._jerseyFor(p, this.playerTeam.jerseyColor));
+                        const ovrColor  = this._overallColor(ovr);
                         return `<button class="fm-player-slot${sel ? ' selected' : ''}"
                                 style="left:${cx}%;top:${cy}%;transform:translate(-50%,-50%);"
                                 data-player-id="${p.id}">
                             <div class="fm-player-avatar">${avatarSVG}</div>
                             <span class="fm-player-name">${lastName}</span>
-                            <span class="fm-player-meta">${p.position} · ${ovr}</span>
+                            <span class="fm-player-meta">${p.position} · <b style="color:${ovrColor};">${ovr}</b></span>
                         </button>`;
                     }).join('')}
                     <div class="fm-formation-label">${fmtLabels[formation] || formation}</div>
                 `;
 
                 pitch.querySelectorAll('.fm-player-slot').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const id = parseInt(btn.dataset.playerId);
-                        const p  = squad.find(pl => pl.id === id);
-                        if (!p) return;
-                        this.showPlayerDetail(p);
-                        if (!this.isPreMatch) this.selectPlayer(p, true);
-                    });
+                    const lookup = () => squad.find(pl => pl.id === parseInt(btn.dataset.playerId));
+                    this._bindClicks(btn,
+                        () => { const p = lookup(); if (p) this.selectPlayer(p, true); },
+                        () => { const p = lookup(); if (p) this.showPlayerDetail(p); }
+                    );
+                });
+            }
+
+            // Single click vs. double click: defer the single-click action briefly so a
+            // following dblclick can cancel it. 240ms matches typical OS double-click thresholds.
+            _bindClicks(el, onSingle, onDouble) {
+                let timer = null;
+                el.addEventListener('click', () => {
+                    if (timer) return;
+                    timer = setTimeout(() => { timer = null; onSingle(); }, 240);
+                });
+                el.addEventListener('dblclick', () => {
+                    if (timer) { clearTimeout(timer); timer = null; }
+                    onDouble();
                 });
             }
 
@@ -2331,6 +2861,10 @@
                     crestEl.innerHTML = this.playerTeam.crestSVGSm;
                     if (titleEl) titleEl.textContent = this.isPreMatch ? '⚽ PICK YOUR SQUAD ⚽' : this.playerTeam.clubName;
                 }
+
+                // Re-renders implicitly close any open detail overlay (e.g. after a sub)
+                const detailOverlay = document.getElementById('playerDetailOverlay');
+                if (detailOverlay) detailOverlay.style.display = 'none';
 
                 // Toggle pre-match vs in-match UI
                 const formSel = document.getElementById('mgmtFormationSelector');
@@ -2357,16 +2891,16 @@
                 // Render formation pitch (left column)
                 this.renderFormationPitch();
 
-                // Render bench (right column)
+                // Render bench / player list (left column)
                 const benchList = document.getElementById('benchList');
                 if (benchList) {
                     benchList.innerHTML = '';
                     this.playerTeam.bench.forEach(player => {
                         const playerEl = this.createPlayerElement(player, false);
-                        playerEl.addEventListener('click', () => {
-                            this.showPlayerDetail(player);
-                            if (!this.isPreMatch) this.selectPlayer(player, false);
-                        });
+                        this._bindClicks(playerEl,
+                            () => this.selectPlayer(player, false),
+                            () => this.showPlayerDetail(player)
+                        );
                         benchList.appendChild(playerEl);
                     });
                 }
@@ -2377,7 +2911,7 @@
                 div.className = `player-item ${isOnField ? 'onfield' : ''}`;
                 div.dataset.playerId = player.id;
 
-                const avatarSVG = AvatarGenerator.createSVG(player.avatar, 50);
+                const avatarSVG = AvatarGenerator.createSVG(player.avatar, 50, this._jerseyFor(player, this.playerTeam?.jerseyColor));
 
                 div.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
@@ -2386,18 +2920,13 @@
                         </div>
                         <div class="player-info" style="flex: 1;">
                             <div class="player-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
-                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} <span style="font-weight:bold;color:#FFD700;">${this.calculateOverall(player)}</span></div>
+                            <div class="player-position">${player.nationality ? player.nationality + ' · ' : ''}${player.position} · <span style="font-weight:600;color:var(--c-text-1);">#${player.number}</span></div>
                         </div>
-                        <div class="player-number">${player.number}</div>
+                        <div class="player-number" style="color:${this._overallColor(this.calculateOverall(player))};">${this.calculateOverall(player)}</div>
                     </div>
                 `;
 
-                // Tap/click to view details
-                div.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.showPlayerDetail(player);
-                });
-
+                // Click handlers (single = sub, double = view details) are wired by the caller.
                 return div;
             }
 
@@ -2418,6 +2947,13 @@
                 }
 
                 this.updateSelectionUI();
+
+                // Auto-confirm: as soon as both a starting XI player and a bench player
+                // are selected (either order), swap them immediately.
+                if (this.selectedPlayerOut && this.selectedPlayerIn) {
+                    const allowed = this.isPreMatch || this.rules.canSubstitute('player');
+                    if (allowed) this.confirmSubstitution();
+                }
             }
 
             updateSelectionUI() {
@@ -2433,45 +2969,15 @@
                     document.querySelector(`[data-player-id="${this.selectedPlayerIn.id}"]`)?.classList.add('selected');
                 }
 
-                const noSubsLeft  = !this.isPreMatch && !this.rules.canSubstitute('player');
-                const confirmBtn  = document.getElementById('confirmSubBtn');
-                confirmBtn.disabled = !this.selectedPlayerOut || !this.selectedPlayerIn || noSubsLeft;
-
-                const info = document.getElementById('managementInfo');
-                const subsLeft = this.isPreMatch ? null : this.rules.subsRemaining('player');
-
-                if (noSubsLeft) {
-                    info.textContent = `❌ All ${this.rules.MAX_SUBS} substitutions used`;
-                    info.style.background = 'rgba(255,68,68,0.12)';
-                    info.style.borderColor = '#FF4444';
-                    info.style.color = '#FF4444';
-                } else if (this.selectedPlayerOut && this.selectedPlayerIn) {
-                    info.textContent = `✅ Ready: ${this.selectedPlayerOut.name} → ${this.selectedPlayerIn.name}` +
-                        (subsLeft !== null ? `  (${subsLeft} sub${subsLeft !== 1 ? 's' : ''} left)` : '');
-                    info.style.background = 'rgba(74,222,128,0.12)';
-                    info.style.borderColor = '#4ADE80';
-                    info.style.color = '#4ADE80';
-                } else {
-                    info.textContent = '👤 Click a player from Starting XI and a substitute to swap them' +
-                        (subsLeft !== null ? `  (${subsLeft} sub${subsLeft !== 1 ? 's' : ''} left)` : '');
-                    info.style.background = 'rgba(255,215,0,0.10)';
-                    info.style.borderColor = '#FFD700';
-                    info.style.color = '#FFD700';
-                }
+                // Info bar + Confirm button were removed — selection is purely visual now
+                // (auto-confirm swaps as soon as both ends are picked).
             }
 
             confirmSubstitution() {
                 if (!this.selectedPlayerOut || !this.selectedPlayerIn) return;
 
                 // During a live match, enforce the substitution quota
-                if (!this.isPreMatch && !this.rules.canSubstitute('player')) {
-                    const info = document.getElementById('managementInfo');
-                    info.textContent = `❌ No substitutions remaining! (${this.rules.MAX_SUBS}/${this.rules.MAX_SUBS} used)`;
-                    info.style.background = 'rgba(255,68,68,0.12)';
-                    info.style.borderColor = '#FF4444';
-                    info.style.color = '#FF4444';
-                    return;
-                }
+                if (!this.isPreMatch && !this.rules.canSubstitute('player')) return;
 
                 const outIndex = this.playerTeam.onField.findIndex(p => p.id === this.selectedPlayerOut.id);
                 if (outIndex === -1) {
@@ -2749,6 +3255,7 @@
                 this.substitutions = [];
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral';
+                this._cpuLastFormationChangeMinute = 0;
                 this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed' };
                 this.momentum = 50;
                 this._attackPhase = null;
