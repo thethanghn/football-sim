@@ -12,6 +12,14 @@ class MatchFlow {
         this._push = { player: 0, cpu: 0 };
         this._ballOwner = null;
 
+        // Per-id player info (position, instructions) — set by the simulator after init().
+        // Used by _pushMult, _driftTick, _wingerTick to apply individual instructions.
+        this._playerInfo = {};
+
+        // When true, the kickoff is being set up / hasn't been taken yet.
+        // Drift / winger / GK ticks are suspended; the simulator also skips events.
+        this._kickoffMode = false;
+
         // Attacker movement mode per team.
         // 'hold' → FWDs hover just behind the defensive line (onside).
         // 'run'  → FWDs are making a timed run past the line (off the ball or through ball).
@@ -27,13 +35,19 @@ class MatchFlow {
         cpuPositions.forEach((p, i)    => this._home.set(100 + i, { x: p.x, y: p.y }));
     }
 
+    // Map from id → player object (with .position and .instructions).
+    // The simulator calls this after init() and re-calls it on substitutions.
+    setPlayerInfo(map) { this._playerInfo = map || {}; }
+    _instruction(id, key) { return this._playerInfo?.[id]?.instructions?.[key]; }
+
     start() {
         this._push      = { player: 0, cpu: 0 };
         this._ballOwner = null;
         this._idle    = setInterval(() => this._driftTick(),  1900);
         this._winger  = setInterval(() => this._wingerTick(), 950);
         this._gkTimer = setInterval(() => this._gkTick(),    850);
-        setTimeout(() => { this._reshape('player', 900); this._reshape('cpu', 900); }, 250);
+        // Match opens with a kick-off — players go to their halves, then start moving.
+        setTimeout(() => this._doKickoff('player'), 150);
     }
 
     stop() {
@@ -166,17 +180,35 @@ class MatchFlow {
     _pushMult(id) {
         const h = this._home.get(id);
         if (!h) return 0;
+        let base;
         if (id < 100) {
-            if (h.x < 15) return 0.04;
-            if (h.x < 35) return 0.50;
-            if (h.x < 60) return 1.00;
-            return 1.30;
+            if      (h.x < 15) base = 0.04;
+            else if (h.x < 35) base = 0.50;
+            else if (h.x < 60) base = 1.00;
+            else               base = 1.30;
         } else {
-            if (h.x > 85) return 0.04;
-            if (h.x > 65) return 0.50;
-            if (h.x > 40) return 1.00;
-            return 1.30;
+            if      (h.x > 85) base = 0.04;
+            else if (h.x > 65) base = 0.50;
+            else if (h.x > 40) base = 1.00;
+            else               base = 1.30;
         }
+        // CM 01/02 forwardRuns instruction: 'often' players push 25 % harder past their home X
+        // when the team is attacking; 'rarely' players hold their ground (×0.65).
+        const fr = this._instruction(id, 'forwardRuns');
+        if (fr === 'often')       base *= 1.25;
+        else if (fr === 'rarely') base *= 0.65;
+
+        // CM 03/04 per-player Mentality override: an "attacking" CB ventures forward more;
+        // a "defensive" striker tracks back. Only applied if the player explicitly overrides
+        // the team mentality (skipped when their setting is 'default'/undefined).
+        const ment = this._instruction(id, 'mentality');
+        if (ment === 'gung-ho')        base *= 1.30;
+        else if (ment === 'attacking') base *= 1.15;
+        else if (ment === 'defensive') base *= 0.80;
+        else if (ment === 'ultra-def') base *= 0.65;
+        // 'normal' and 'default'/null → no change
+
+        return base;
     }
 
     // Clamp a forward's X so they stay behind the last outfield defender.
@@ -248,9 +280,42 @@ class MatchFlow {
         const push   = this._push[team];
         const offset = push * this._pushMult(id);
         let x = id < 100 ? h.x + offset : h.x - offset;
+        let y = h.y;
+
+        // CM 01/02-style movement arrow: the player effectively takes a new tactical position,
+        // running toward the arrow's destination. This is a strong effect — the player should
+        // visibly spend most of their time near the arrow's target, especially during attacks.
+        // A "forward" arrow on a CM lets them play like an AM; "back" turns a wide-mid into a
+        // wing-back, etc. Player team attacks +x; CPU attacks −x.
+        const arrow = this._instruction(id, 'arrow');
+        if (arrow) {
+            const fwdSign = team === 'player' ? 1 : -1;
+            const LEN = 22, DIAG = 16;
+            const arrowOffsets = {
+                'forward':        { dx:  LEN  * fwdSign, dy:  0    },
+                'back':           { dx: -LEN  * fwdSign, dy:  0    },
+                'left':           { dx:  0,              dy: -LEN  },
+                'right':          { dx:  0,              dy:  LEN  },
+                'forward-left':   { dx:  DIAG * fwdSign, dy: -DIAG },
+                'forward-right':  { dx:  DIAG * fwdSign, dy:  DIAG },
+                'back-left':      { dx: -DIAG * fwdSign, dy: -DIAG },
+                'back-right':     { dx:  DIAG * fwdSign, dy:  DIAG },
+            };
+            const a = arrowOffsets[arrow];
+            if (a) {
+                // Baseline 75 % shift even at rest, full + extra when team is committed forward.
+                // This makes the new role the player's *default* position, not a small nudge.
+                const intensity = push > 0
+                    ? 0.85 + 0.25 * Math.min(1, push / 6)   // 0.85 → 1.10
+                    : 0.55;                                  // even on defence, still leans toward arrow
+                x += a.dx * intensity;
+                y += a.dy * intensity;
+            }
+        }
+
         // In hold mode, FWDs' target position is also bounded by the offside line.
         if (this._fwdMode[team] === 'hold') x = this._onside(id, x);
-        return { x: this._clamp(x), y: h.y };
+        return { x: this._clamp(x), y: this._clamp(y) };
     }
 
     _reshape(team, ms = 650) {
@@ -279,7 +344,18 @@ class MatchFlow {
         return h && (h.y < 28 || h.y > 72);
     }
 
+    // Wingers: wide AND in the forward third (LW/RW, wide forwards in 343/433/352).
+    // Full-backs and wide mids are wide but not forward, so they don't qualify.
+    _isWinger(id) {
+        const h = this._home.get(id);
+        if (!h) return false;
+        const wide    = h.y < 28 || h.y > 72;
+        const forward = id < 100 ? h.x >= 55 : h.x <= 45;
+        return wide && forward;
+    }
+
     _driftTick() {
+        if (this._kickoffMode) return;
         ['player', 'cpu'].forEach(team => {
             this._outfield(team)
                 .sort(() => Math.random() - 0.5)
@@ -295,7 +371,11 @@ class MatchFlow {
                     const h      = this._home.get(id);
                     const isFwd  = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
                     const isWide = this._isWide(id);
-                    const yAmp   = isWide ? 15 : 8; // wide players drift further up/down
+                    // freeRole 'yes' → larger amplitudes so the player drifts off-position more.
+                    const free   = this._instruction(id, 'freeRole') === 'yes';
+                    const ampMul = free ? 1.7 : 1.0;
+                    const yAmp   = (isWide ? 15 : 8) * ampMul;
+                    const xAmp   = 10 * ampMul;
                     let nx, ny;
 
                     if (isFwd && this._fwdMode[team] === 'hold') {
@@ -308,9 +388,9 @@ class MatchFlow {
                         } else {
                             nx = this._clamp(this._onside(id, t.x + (Math.random() - 0.5) * 6), lo, hi);
                         }
-                        ny = this._clamp(t.y + (Math.random() - 0.5) * 12);
+                        ny = this._clamp(t.y + (Math.random() - 0.5) * (12 * ampMul));
                     } else {
-                        nx = this._clamp(t.x + (Math.random() - 0.5) * 10, lo, hi);
+                        nx = this._clamp(t.x + (Math.random() - 0.5) * xAmp, lo, hi);
                         ny = this._clamp(t.y + (Math.random() - 0.5) * yAmp);
                     }
                     const ms = 700 + Math.random() * 600;
@@ -322,10 +402,30 @@ class MatchFlow {
     }
 
     // Dedicated fast tick for wide players (wingers, full-backs) — runs 2× faster than driftTick.
+    // Wingers get a markedly larger movement zone, modulated by attack/defence phase:
+    //   • Attacking  → big lateral runs, push high, cut inside (drift toward Y=50), wider X spread.
+    //   • Defending  → tuck back narrower toward home X/Y.
+    //   • Off-ball far-side runs → when their team has the ball on the opposite flank, drift
+    //     toward the near/far post (a winger arriving at the back stick).
     _wingerTick() {
+        if (this._kickoffMode) return;
         ['player', 'cpu'].forEach(team => {
             const wideIds = this._outfield(team).filter(id => this._isWide(id));
             if (!wideIds.length) return;
+
+            // Per-team attacking pressure (-10..+15). Positive = pushing forward.
+            const push       = this._push[team];
+            const attacking  = push > 2;
+            const retreating = push < -2;
+
+            // Where's the ball, in pitch coords? Used for "winger on the far side" runs.
+            let ballX = null, ballY = null;
+            const ballEl = this.pitch?.ballElement;
+            if (ballEl && this.pitch.getPitchCoords) {
+                const c = this.pitch.getPitchCoords(parseFloat(ballEl.getAttribute('cx')),
+                                                   parseFloat(ballEl.getAttribute('cy')));
+                ballX = c.pitchX; ballY = c.pitchY;
+            }
 
             // Move 1–2 wide players per tick to keep movement staggered, not synchronised
             const pick = wideIds.sort(() => Math.random() - 0.5).slice(0, Math.random() < 0.6 ? 1 : 2);
@@ -334,28 +434,82 @@ class MatchFlow {
                 const v = this._vis(id);
                 if (!t || !v) return;
 
-                const lo    = team === 'player' ?  4 : 30;
-                const hi    = team === 'player' ? 70 : 96;
-                const h     = this._home.get(id);
-                const isFwd = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
+                const h        = this._home.get(id);
+                const isFwd    = h && (team === 'player' ? h.x >= 60 : h.x <= 40);
+                const isWinger = this._isWinger(id);
+                const free     = this._instruction(id, 'freeRole') === 'yes';
+                // Attacking wingers — or any free-role wide player — earn a wider X clamp.
+                const wingerAtkClamp = (isWinger && push > 2) || free;
+                const lo = wingerAtkClamp ? (team === 'player' ? 20 :  4) : (team === 'player' ?  4 : 30);
+                const hi = wingerAtkClamp ? (team === 'player' ? 96 : 80) : (team === 'player' ? 70 : 96);
 
-                // Wingers: big vertical Y runs plus moderate forward/backward X movement
-                const yRun  = (Math.random() - 0.5) * 22;  // up to ±11 units on pitch
-                const xNudge = (Math.random() - 0.5) * 8;
+                // Decide movement amplitudes by role + phase. Free-role players get a ×1.4 boost.
+                const freeMul = free ? 1.4 : 1.0;
+                let yRun, xRun, msBase, msJit;
+                if (isWinger && attacking) {
+                    // Wingers in attack: big runs, push high, big lateral coverage
+                    yRun   = (Math.random() - 0.5) * 38;             // ±19 lateral units
+                    xRun   = team === 'player'
+                                ? 4 + Math.random() * 9              // sprint forward
+                                : -(4 + Math.random() * 9);
+                    msBase = 380; msJit = 320;                       // faster animations
+                } else if (isWinger && retreating) {
+                    // Tucking back to help defend
+                    yRun   = (Math.random() - 0.5) * 12;
+                    xRun   = team === 'player' ? -(2 + Math.random() * 6) : (2 + Math.random() * 6);
+                    msBase = 600; msJit = 400;
+                } else if (isWinger) {
+                    // Neutral phase: still wider than baseline
+                    yRun   = (Math.random() - 0.5) * 26;
+                    xRun   = (Math.random() - 0.5) * 11;
+                    msBase = 480; msJit = 420;
+                } else {
+                    // Non-winger wide players (full-backs, wide mids): original behaviour
+                    yRun   = (Math.random() - 0.5) * 22;
+                    xRun   = (Math.random() - 0.5) * 8;
+                    msBase = 500; msJit = 450;
+                }
+
+                // Apply free-role amplitude boost on top of role/phase amplitudes
+                yRun *= freeMul;
+                xRun *= freeMul;
+
+                // Compute targets
                 let nx, ny;
 
                 if (isFwd && this._fwdMode[team] === 'hold') {
                     const line = this.getOffsideLine(team);
                     nx = this._clamp(line != null
                         ? (team === 'player' ? line - 0.5 - Math.random() * 5 : line + 0.5 + Math.random() * 5)
-                        : this._onside(id, t.x + xNudge), lo, hi);
+                        : this._onside(id, t.x + xRun), lo, hi);
                     ny = this._clamp(t.y + yRun);
                 } else {
-                    nx = this._clamp(t.x + xNudge, lo, hi);
+                    nx = this._clamp(t.x + xRun, lo, hi);
                     ny = this._clamp(t.y + yRun);
                 }
 
-                const ms = 500 + Math.random() * 450;
+                // Winger flair: cut inside on attacks, or arrive at far post when ball is wide on the other flank
+                if (isWinger && attacking) {
+                    const homeTopHalf = h.y < 50;
+                    const ballOnOppFlank = ballX != null
+                        && (team === 'player' ? ballX >= 50 : ballX <= 50)   // ball in attacking half
+                        && ballY != null
+                        && (homeTopHalf ? ballY > 60 : ballY < 40);
+
+                    if (ballOnOppFlank && Math.random() < 0.55) {
+                        // Far-post run: aim for the back stick zone in the box
+                        const boxX = team === 'player' ? 86 + Math.random() * 8 : 14 - Math.random() * 8;
+                        const postY = homeTopHalf ? 38 + Math.random() * 8 : 54 + Math.random() * 8;
+                        nx = this._clamp(boxX, lo, hi);
+                        ny = this._clamp(postY);
+                    } else if (Math.random() < 0.40) {
+                        // Cut inside: bias Y back toward the centre half-space (~30–40 / 60–70)
+                        const target = homeTopHalf ? 32 + Math.random() * 10 : 58 + Math.random() * 10;
+                        ny = this._clamp(t.y + (target - t.y) * (0.5 + Math.random() * 0.3));
+                    }
+                }
+
+                const ms = msBase + Math.random() * msJit;
                 this.anim.animateMove(id, v.pitchX, v.pitchY, nx, ny, ms);
                 if (id === this._ballOwner) this._animBall(nx, ny, ms * 0.85);
             });
@@ -365,6 +519,7 @@ class MatchFlow {
     // ─── GK homing ────────────────────────────────────────────────────────────────
 
     _gkTick() {
+        if (this._kickoffMode) return;
         [[0, 8, 50], [100, 92, 50]].forEach(([id, hx, hy]) => {
             const v = this._vis(id);
             if (!v) return;
@@ -378,17 +533,27 @@ class MatchFlow {
 
     // ─── Event handlers ───────────────────────────────────────────────────────────
 
-    _evPass({ passer, receiver, team }) {
+    _evPass({ passer, receiver, team, x, y }) {
         if (!team) return;
 
-        let passId = (passer   != null && this._vis(passer))   ? passer   : this._randOf(team);
-        let recvId = (receiver != null && this._vis(receiver)) ? receiver : this._randOf(team);
+        // Prefer players near the event zone (x,y) when picking a passer/receiver if the
+        // simulator didn't pin specific IDs. This keeps the ball visibly inside the zone.
+        const pickByZone = (poolIds) => {
+            if (x == null || y == null) return poolIds[Math.floor(Math.random() * poolIds.length)];
+            let best = poolIds[0], bestD = Infinity;
+            for (const id of poolIds) {
+                const v = this._vis(id);
+                if (!v) continue;
+                const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+                if (d < bestD) { bestD = d; best = id; }
+            }
+            return best;
+        };
+        const teamIds = this._outfield(team);
+        let passId = (passer   != null && this._vis(passer))   ? passer   : pickByZone(teamIds);
+        let recvId = (receiver != null && this._vis(receiver)) ? receiver : pickByZone(teamIds.filter(id => id !== passId));
         if (passId == null || recvId == null) return;
-        if (passId === recvId) {
-            const others = this._outfield(team).filter(id => id !== passId);
-            recvId = others.length ? others[Math.floor(Math.random() * others.length)] : null;
-            if (!recvId) return;
-        }
+        if (passId === recvId) return;
 
         const pv = this._vis(passId);
         const rv = this._vis(recvId);
@@ -443,71 +608,107 @@ class MatchFlow {
         this._push[team] =  4;
         this._reshape(opp, 1100);
 
-        setTimeout(() => this._doKickoff(), 5200);
+        // Conceding team kicks off
+        setTimeout(() => this._doKickoff(team === 'player' ? 'cpu' : 'player'), 5200);
     }
 
-    _evChance({ team }) {
+    _evChance({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
+        // Pick the attacker nearest to the event zone — they'll be the one taking the shot.
+        const attackers = this._outfield(team);
+        let attId = attackers[0], bestD = Infinity;
+        if (x != null && y != null) {
+            for (const id of attackers) {
+                const v = this._vis(id);
+                if (!v) continue;
+                const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+                if (d < bestD) { bestD = d; attId = id; }
+            }
+        } else {
+            attId = this._randOf(team);
+        }
         if (attId == null) return;
 
-        const goalX = team === 'player' ? 89 : 11;
-        const goalY = 50 + (Math.random() - 0.5) * 24;
+        // Shot origin = the event zone; ball flies a few units toward the actual goal line.
+        const shotX = x ?? (team === 'player' ? 89 : 11);
+        const shotY = y ?? (50 + (Math.random() - 0.5) * 24);
 
-        // All FWDs burst toward goal as the chance develops
         this._triggerRun(team, 1600);
 
         this._ballTo(attId, 240);
         setTimeout(() => {
-            this._move(attId, goalX, goalY, 460);
+            this._move(attId, shotX, shotY, 460);
             setTimeout(() => {
                 this._ballOwner = null;
-                this._animBall(goalX + (team === 'player' ? 7 : -7), goalY, 380, true);
+                this._animBall(shotX + (team === 'player' ? 7 : -7), shotY, 380, true);
             }, 280);
         }, 250);
 
         this._applyPush(team, 5);
     }
 
-    _evMiss({ team }) {
+    _evMiss({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
-        if (attId != null) this._ballTo(attId, 200);
+        // Shooter is the attacker nearest the event zone (so the ball starts there).
+        const attId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
+        if (attId != null) {
+            const v = this._vis(attId);
+            if (v && x != null && y != null) {
+                this._ballOwner = attId;
+                this._animBall(x, y, 200);
+            } else {
+                this._ballTo(attId, 200);
+            }
+        }
 
         setTimeout(() => {
-            const wideY = Math.random() > 0.5
-                ? 50 + 32 + Math.random() * 14
-                : 50 - 32 - Math.random() * 14;
+            const baseY = y ?? 50;
+            const wideY = baseY + (Math.random() > 0.5 ? 1 : -1) * (28 + Math.random() * 12);
             this._ballOwner = null;
             this._animBall(team === 'player' ? 100 : 0, this._clamp(wideY, 0, 100), 410);
         }, 230);
 
-        // Missed — attacking team lost the ball, FWDs retreat onside
         this._snapFwdsOnside(team);
         this._applyPush(team, -3);
     }
 
-    _evBar({ team }) {
+    _evBar({ team, x, y }) {
         if (!team) return;
-        const attId = this._randOf(team);
+        const attId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
         if (attId != null) this._ballTo(attId, 180);
 
+        const shotX = x ?? (team === 'player' ? 88 : 12);
+        const shotY = y ?? 50;
         setTimeout(() => {
             this._ballOwner = null;
-            this._animBall(team === 'player' ? 100 : 0, 50 + (Math.random()-0.5)*10, 390, true);
+            // Ball strikes the bar near (shotX, shotY) then rebounds back toward midfield/box.
+            this._animBall(team === 'player' ? 100 : 0, shotY + (Math.random()-0.5)*10, 390, true);
         }, 200);
         setTimeout(() => {
             this._animBall(
-                team === 'player' ? 76+Math.random()*13 : 11+Math.random()*13,
-                50 + (Math.random()-0.5)*32, 330);
+                team === 'player' ? shotX - 4 - Math.random()*8 : shotX + 4 + Math.random()*8,
+                shotY + (Math.random()-0.5)*30, 330);
         }, 640);
 
-        // Ball off the bar — possession uncertain, snap FWDs back onside
         this._snapFwdsOnside(team);
         this._applyPush(team, -2);
     }
 
-    _evSave({ team }) {
+    // Find the player on `team` whose pitch position is nearest to (x, y). Returns null if no
+    // coords are given.
+    _pickNearTeamId(team, x, y) {
+        if (x == null || y == null) return null;
+        let best = null, bestD = Infinity;
+        for (const id of this._outfield(team)) {
+            const v = this._vis(id);
+            if (!v) continue;
+            const d = Math.hypot(v.pitchX - x, v.pitchY - y);
+            if (d < bestD) { bestD = d; best = id; }
+        }
+        return best;
+    }
+
+    _evSave({ team, x, y }) {
         if (!team) return;
         const gkId  = team === 'player' ? 0 : 100;
         const homeX = team === 'player' ? 8  : 92;
@@ -516,7 +717,14 @@ class MatchFlow {
         const attTeam = team === 'player' ? 'cpu' : 'player';
 
         this._ballOwner = null;
-        this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true);
+        // If the simulator told us where the shot came from, animate ball from that point
+        // toward the GK so the save visibly originates in the attacking zone.
+        if (x != null && y != null) {
+            this._animBall(x, y, 80);
+            setTimeout(() => this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true), 90);
+        } else {
+            this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true);
+        }
 
         if (gkV) {
             this.anim.animateMove(gkId, gkV.pitchX, gkV.pitchY,
@@ -540,12 +748,14 @@ class MatchFlow {
         }, 460);
     }
 
-    _evTackle({ team }) {
+    _evTackle({ team, x, y }) {
         if (!team) return;
         const opp   = team === 'player' ? 'cpu' : 'player';
-        const defId = this._randOf(team);
+        // Pick players nearest to the event zone so the tackle visibly happens there.
+        const defId = this._pickNearTeamId(team, x, y) ?? this._randOf(team);
         const attId = (this._ballOwner != null && this._outfield(opp).includes(this._ballOwner))
-                      ? this._ballOwner : this._randOf(opp);
+                      ? this._ballOwner
+                      : (this._pickNearTeamId(opp, x, y) ?? this._randOf(opp));
         if (defId == null || attId == null) return;
 
         const dv = this._vis(defId);
@@ -621,19 +831,24 @@ class MatchFlow {
             this.anim.animateMove(gkId, gkV.pitchX, gkV.pitchY, gkHomeX, gkY, 480);
         }
 
-        // Defenders fill box — near post, middle, far post, edge
+        // Defenders flood the box — defending side outnumbers attackers at corners.
+        // 6-yard line, penalty spot band, and edge-of-box, plus one outlet left outside.
         const defBoxX = team === 'player' ? 91 : 9;
+        const sign = team === 'player' ? -1 : 1;
         const defSpots = [
-            [defBoxX + (team === 'player' ? -3 : 3), cornerY < 50 ? 35 : 65],
-            [gkHomeX + (team === 'player' ? 5 : -5), 50],
-            [defBoxX + (team === 'player' ? -8 : 8), cornerY < 50 ? 58 : 42],
-            [defBoxX + (team === 'player' ? -16 : 16), 44],
-            [defBoxX + (team === 'player' ? -16 : 16), 56],
+            [defBoxX + sign * 3,  cornerY < 50 ? 35 : 65],   // near post
+            [defBoxX + sign * 3,  cornerY < 50 ? 62 : 38],   // far post
+            [gkHomeX - sign * 5,  50],                        // 6-yard middle
+            [defBoxX + sign * 8,  cornerY < 50 ? 42 : 58],   // penalty spot, near side
+            [defBoxX + sign * 8,  50],                        // penalty spot, center
+            [defBoxX + sign * 8,  cornerY < 50 ? 58 : 42],   // penalty spot, far side
+            [defBoxX + sign * 16, 44],                        // edge of box, near
+            [defBoxX + sign * 16, 56],                        // edge of box, far
         ];
         this._outfield(defTeam).slice(0, defSpots.length).forEach((id, i) => {
             const [dx, dy] = defSpots[i];
             this._move(id, this._clamp(dx + (Math.random()-0.5)*4), this._clamp(dy + (Math.random()-0.5)*5),
-                       480 + i * 40);   // max 480+4*40=640ms
+                       450 + i * 30);   // max 450+7*30=660ms, still completes before cross at t=750
         });
 
         // All setup animations ≤ 640ms. At 750ms, deliver the cross and
@@ -821,22 +1036,24 @@ class MatchFlow {
     // ─── Offside ──────────────────────────────────────────────────────────────────
     // Assistant raises flag. Play stops. Ball handed to defending team.
 
-    _evOffside({ team }) {
+    _evOffside({ team, x, y }) {
         if (!team) return;
         const defTeam = team === 'player' ? 'cpu' : 'player';
 
-        // Ball snaps to the offside line (where flag is raised)
+        // Ball snaps to the offside line (where flag is raised). Prefer the engine zone's
+        // Y if provided so the flag falls on the same lane the attack was building down.
         const line = this.getOffsideLine(team);
-        const flagX = line != null ? line : (team === 'player' ? 75 : 25);
+        const flagX = line != null ? line : (x != null ? x : (team === 'player' ? 75 : 25));
+        const flagY = y != null ? y : 50 + (Math.random()-0.5)*28;
         this._ballOwner = null;
-        this._animBall(flagX, 50 + (Math.random()-0.5)*28, 350);
+        this._animBall(flagX, flagY, 350);
 
         // Attackers must retreat behind the ball — drop shape back
         this._applyPush(team, -5);
 
-        // Defending team takes the indirect free kick
+        // Defending team takes the indirect free kick — prefer a defender near the flag
         setTimeout(() => {
-            const recvId = this._randOf(defTeam);
+            const recvId = this._pickNearTeamId(defTeam, flagX, flagY) ?? this._randOf(defTeam);
             if (recvId != null) {
                 this._ballTo(recvId, 380);
                 this._applyPush(defTeam, 2);
@@ -844,18 +1061,25 @@ class MatchFlow {
         }, 900);
     }
 
-    _evPossession({ team } = {}) {
+    _evPossession({ team, x, y } = {}) {
         if (!team) return;
-        const pid = this._randOf(team);
-        if (pid) {
-            this._ballTo(pid, 380);
+        // Prefer a player near the zone where possession was won so the ball animates into
+        // that area — gives a believable "kick-off / restart from this zone" feel.
+        const pid = (x != null && y != null) ? this._pickNearTeamId(team, x, y) : null;
+        const id = pid ?? this._randOf(team);
+        if (id) {
+            this._ballTo(id, 380);
             this._applyPush(team, 2);
         }
     }
 
     // ─── Kickoff reset ────────────────────────────────────────────────────────────
+    // Players line up on their own halves, ball sits on the centre spot, all movement
+    // is suspended until the kick is actually taken (~1500 ms later).
 
-    _doKickoff() {
+    _doKickoff(kickoffTeam = 'player') {
+        // Freeze state
+        this._kickoffMode = true;
         ['player', 'cpu'].forEach(t => {
             if (this._fwdRunTimer[t]) { clearTimeout(this._fwdRunTimer[t]); this._fwdRunTimer[t] = null; }
             this._fwdMode[t] = 'hold';
@@ -863,8 +1087,55 @@ class MatchFlow {
         this._push.player = 0;
         this._push.cpu    = 0;
         this._ballOwner   = null;
+
+        // Position each team in its own half. Two attackers from the kicking team stand
+        // in the centre circle on their own side (the spot + a support).
+        this._positionForKickoff(kickoffTeam);
+
+        // Ball on the centre spot.
         this._animBall(50, 50, 580);
-        this._reshape('player', 950);
-        this._reshape('cpu',    950);
+
+        // After the setup delay, the kick is taken: short pass between the two takers,
+        // and normal movement resumes.
+        setTimeout(() => this._releaseKickoff(kickoffTeam), 1500);
+    }
+
+    _positionForKickoff(kickoffTeam) {
+        // Pick two forwards from the kicking team as the kick-off takers.
+        const takerIds = this._fwdIds(kickoffTeam).slice(0, 2);
+
+        ['player', 'cpu'].forEach(team => {
+            const isPlayer = team === 'player';
+            this._ids(team).forEach(id => {
+                const home = this._home.get(id);
+                const v = this._vis(id);
+                if (!home || !v) return;
+
+                let targetX, targetY;
+                if (takerIds.includes(id)) {
+                    // Centre-circle position for the takers (on their own side of halfway).
+                    const slot = takerIds.indexOf(id);
+                    targetX = isPlayer ? 48 : 52;
+                    targetY = slot === 0 ? 48 : 52;
+                } else {
+                    // Everyone else is clamped to their own half. Preserves their lateral lane.
+                    targetX = isPlayer ? Math.min(48, home.x) : Math.max(52, home.x);
+                    targetY = home.y;
+                }
+                this.anim.animateMove(id, v.pitchX, v.pitchY, targetX, targetY, 700 + Math.random() * 250);
+            });
+        });
+    }
+
+    _releaseKickoff(kickoffTeam) {
+        this._kickoffMode = false;
+        // Two takers play a short pass to start the match
+        const takerIds = this._fwdIds(kickoffTeam).slice(0, 2);
+        if (takerIds.length >= 2) {
+            this._ballTo(takerIds[0], 200);
+            setTimeout(() => this._ballTo(takerIds[1], 320), 250);
+        } else if (takerIds[0] != null) {
+            this._ballTo(takerIds[0], 200);
+        }
     }
 }

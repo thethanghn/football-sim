@@ -1,0 +1,401 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Dramatic scenes — test bench</title>
+<style>
+  body { background: #1a1a1a; color: #eee; font-family: Arial, sans-serif; padding: 20px; margin: 0; }
+  h1 { margin: 0 0 12px; font-size: 18px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 0; flex-wrap: wrap; }
+  .tab {
+    background: #2a2a2a; color: #ccc; border: none; padding: 8px 14px;
+    font-size: 13px; cursor: pointer; border-radius: 6px 6px 0 0;
+    border-bottom: 2px solid transparent;
+  }
+  .tab:hover { background: #333; }
+  .tab.active { background: #FFD700; color: #000; font-weight: 700; border-bottom-color: #FFD700; }
+
+  /* Controls panel (sits flush against the tab strip) */
+  .controls {
+    background: #2a2a2a;
+    padding: 12px 14px;
+    border-radius: 0 6px 6px 6px;
+    display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .controls label { font-size: 13px; color: #bbb; display: flex; align-items: center; gap: 6px; }
+  .controls input[type=color] { width: 40px; height: 30px; padding: 0; border: 1px solid #555; background: transparent; cursor: pointer; }
+  .controls input[type=text] { background: #1a1a1a; color: #eee; border: 1px solid #555; padding: 5px 8px; border-radius: 3px; font-size: 13px; width: 130px; }
+  .controls input[type=number] { background: #1a1a1a; color: #eee; border: 1px solid #555; padding: 5px 8px; border-radius: 3px; font-size: 13px; width: 60px; }
+  .controls select { background: #1a1a1a; color: #eee; border: 1px solid #555; padding: 5px 8px; border-radius: 3px; font-size: 13px; }
+  .controls button {
+    background: #FFD700; color: #000; border: none; padding: 7px 16px;
+    font-weight: 700; border-radius: 4px; cursor: pointer; font-size: 13px;
+  }
+  .controls button:hover { background: #ffcd00; }
+
+  /* Stage */
+  .stage {
+    position: relative;
+    width: 600px;
+    height: 600px;
+    background: #0e0e0e;
+    border: 1px solid #444;
+    overflow: hidden;
+  }
+  #scene { position: absolute; inset: 0; }
+  #scene svg { width: 100%; height: 100%; display: block; }
+  .note { font-size: 12px; color: #888; margin-top: 8px; max-width: 600px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>🎬 Dramatic scenes — test bench</h1>
+
+<div class="tabs" id="tabs"></div>
+<div class="controls" id="controls"></div>
+<div class="stage"><div id="scene"></div></div>
+<div class="note" id="note">Pick a scene tab above, adjust controls, hit Play.</div>
+
+<!-- CDN: SVG.js (matches the version football-sim.html uses) -->
+<script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
+
+<!-- Scene runtime: shared helpers + every scene file -->
+<script src="random.js"></script>
+<script src="audio.js"></script>
+<script>
+  // Expose a synthesised AudioFx so scenes that play tense sounds (penalty
+  // build-up etc.) can find it via `window.audio`. The AudioContext stays
+  // suspended until the user interacts with the page (clicking Play counts).
+  window.audio = new AudioFx();
+</script>
+<script src="dramatic-scenes/_helpers.js"></script>
+<script src="dramatic-scenes/goal.js"></script>
+<script src="dramatic-scenes/freekick.js"></script>
+<script src="dramatic-scenes/kickoff.js"></script>
+<script src="dramatic-scenes/corner.js"></script>
+<script src="dramatic-scenes/redCard.js"></script>
+<script src="dramatic-scenes/disallowed.js"></script>
+<script src="dramatic-scenes/penalty.js"></script>
+<script src="dramatic-scenes/injury.js"></script>
+
+<!--
+  Load football-sim.js inside a hidden iframe to get AvatarGenerator (needed for
+  the kickoff scene's avatar faces). The iframe's bootstrap will throw — no game
+  DOM in there — and its catch handler trashes ITS body. Our test page is
+  untouched. AvatarGenerator is declared as a top-level class before the bootstrap
+  so it's already on iframe.contentWindow by the time the error fires.
+-->
+<iframe id="srcFrame" style="display:none"></iframe>
+<script>
+// Kick the iframe load off in the background — it can take a second or two to
+// parse + execute the full football-sim.js bundle. We do NOT block init() on it:
+// the page boots immediately, every scene works (kickoff uses skin-circle heads
+// as fallback), and once the iframe is ready we upgrade kickoff to real faces by
+// replaying it if it's still the active tab.
+(function loadAvatarGenerator() {
+  const iframe = document.getElementById('srcFrame');
+  const baseUrl = location.href.replace(/[^/]+$/, '');
+  const srcdoc = `<!doctype html><html><head><base href="${baseUrl}"></head><body>` +
+    `<script>window.alert=function(){};<\/script>` +
+    `<script src="random.js"><\/script>` +
+    `<script src="football-sim.js"><\/script>` +
+    `</body></html>`;
+  iframe.srcdoc = srcdoc;
+  iframe.onload = () => {
+    window.AvatarGenerator = iframe.contentWindow.AvatarGenerator;
+    window.Team            = iframe.contentWindow.Team;
+    if (typeof window.AvatarGenerator !== 'function') {
+      console.warn('AvatarGenerator not found — kickoff scene heads will keep using skin-circle fallback.');
+      return;
+    }
+    if (typeof window.Team !== 'function') {
+      console.warn('Team not found — kickoff scene will use stub players (no names / positions).');
+    }
+    // Invalidate the team cache so the next play uses the real factories, and
+    // re-play kickoff if it's currently active so the user sees the upgrade.
+    teamCache.player = teamCache.cpu = null;
+    if (activeKey === 'kickoff') play();
+  };
+})();
+
+// ─── Scene catalog ─────────────────────────────────────────────────────────
+// Each entry: tab label, controls list, payload builder.
+const SCENES = {
+  kickoff: {
+    label: '⚽ Kick-off',
+    controls: [
+      { type: 'color',    key: 'attackColor', label: 'Attacking', default: '#CC0000' },
+      { type: 'color',    key: 'defendColor', label: 'Defending', default: '#1133CC' },
+      { type: 'number',   key: 'minute',      label: 'Minute',    default: 1, min: 1, max: 120 },
+      { type: 'checkbox', key: 'reshuffle',   label: 'Reshuffle players', default: true },
+    ],
+    build: (v) => ({
+      attackTeam:  teams.player(v.attackColor, v.reshuffle),
+      defendTeam:  teams.cpu(v.defendColor, v.reshuffle),
+      attackColor: v.attackColor,
+      defendColor: v.defendColor,
+      minute:      v.minute,
+    }),
+  },
+  goal: {
+    label: '🎉 Goal',
+    controls: [
+      { type: 'color', key: 'color', label: 'Ring colour', default: '#FFD700' },
+    ],
+    build: (v) => ({ color: v.color }),
+  },
+  freekick: {
+    label: '📐 Free kick',
+    controls: [
+      { type: 'color',    key: 'takerColor', label: 'Taker',  default: '#FFD700' },
+      { type: 'color',    key: 'wallColor',  label: 'Wall',   default: '#EF4444' },
+      { type: 'color',    key: 'gkColor',    label: 'GK',     default: '#39FF14' },
+      { type: 'checkbox', key: 'reshuffle',  label: 'Reshuffle players', default: true },
+    ],
+    build: (v) => ({
+      takerColor: v.takerColor,
+      wallColor:  v.wallColor,
+      gkColor:    v.gkColor,
+      attackTeam: teams.player(v.takerColor, v.reshuffle),
+      defendTeam: teams.cpu   (v.wallColor,  v.reshuffle),
+    }),
+  },
+  corner: {
+    label: '🚩 Corner',
+    controls: [
+      { type: 'color',    key: 'takerColor',    label: 'Taker',     default: '#FFD700' },
+      { type: 'color',    key: 'defenderColor', label: 'Defenders', default: '#3B82F6' },
+      { type: 'checkbox', key: 'reshuffle',     label: 'Reshuffle players', default: true },
+    ],
+    build: (v) => ({
+      takerColor:    v.takerColor,
+      defenderColor: v.defenderColor,
+      attackTeam:    teams.player(v.takerColor,    v.reshuffle),
+      defendTeam:    teams.cpu   (v.defenderColor, v.reshuffle),
+    }),
+  },
+  redCard: {
+    label: '🟥 Red card',
+    controls: [
+      { type: 'text',   key: 'name',   label: 'Player', default: 'Henderson' },
+      { type: 'number', key: 'minute', label: 'Minute', default: 62, min: 1, max: 120 },
+      { type: 'select', key: 'kind',   label: 'Kind', default: 'red',
+        options: [['red', 'Straight red'], ['second', 'Second yellow']] },
+    ],
+    build: (v) => ({ name: v.name, minute: v.minute, kind: v.kind }),
+  },
+  disallowed: {
+    label: '🚫 Disallowed',
+    controls: [
+      { type: 'select', key: 'reason', label: 'Reason', default: 'offside',
+        options: [['offside', 'Offside'], ['handball', 'Handball'], ['foul', 'Foul in build-up']] },
+    ],
+    build: (v) => ({ reason: v.reason }),
+  },
+  penalty: {
+    label: '⚡ Penalty',
+    controls: [
+      { type: 'color',    key: 'kickerColor', label: 'Kicker',   default: '#FFD700' },
+      { type: 'color',    key: 'defColor',    label: 'Defence',  default: '#EF4444' },
+      { type: 'color',    key: 'gkColor',     label: 'GK',       default: '#39FF14' },
+      { type: 'text',     key: 'name',        label: 'Fouled by', default: 'Maguire' },
+      { type: 'number',   key: 'minute',      label: 'Minute',    default: 47, min: 1, max: 120 },
+      { type: 'checkbox', key: 'reshuffle',   label: 'Reshuffle players', default: true },
+    ],
+    build: (v) => ({
+      kickerColor: v.kickerColor,
+      defColor:    v.defColor,
+      gkColor:     v.gkColor,
+      name:        v.name,
+      minute:      v.minute,
+      attackTeam:  teams.player(v.kickerColor, v.reshuffle),
+      defendTeam:  teams.cpu   (v.defColor,    v.reshuffle),
+    }),
+  },
+  injury: {
+    label: '🤕 Injury',
+    controls: [
+      { type: 'text',   key: 'name',   label: 'Player', default: 'Pogba' },
+      { type: 'number', key: 'minute', label: 'Minute', default: 73, min: 1, max: 120 },
+    ],
+    build: (v) => ({ name: v.name, minute: v.minute }),
+  },
+};
+
+// ─── Real game-grade teams (cached so faces don't re-roll unless asked) ──
+// Prefers Team.createRoster (loaded from football-sim.js via the hidden iframe)
+// so the kickoff scene receives the same player objects the real game uses —
+// full names, positions, avatars, attributes. Falls back to a minimal stub
+// (id + number + avatar only) while the iframe is still loading.
+const teamCache = { player: null, cpu: null, playerColor: null, cpuColor: null };
+
+function makeTeam(jerseyColor, opts = {}) {
+  if (typeof Team === 'function') {
+    // Real roster (20–25 players); kickoff only uses the first 11 as onField.
+    return Team.createRoster(jerseyColor, opts).slice(0, 11);
+  }
+  // Fallback stub while the iframe is still loading.
+  return Array.from({ length: 11 }, (_, i) => {
+    const avatar = (typeof AvatarGenerator !== 'undefined')
+      ? AvatarGenerator.generateAvatar(i, jerseyColor)
+      : null;
+    return { id: i, number: i + 1, avatar };
+  });
+}
+
+const teams = {
+  player(color, reshuffle) {
+    if (reshuffle || !teamCache.player || teamCache.playerColor !== color) {
+      teamCache.player = makeTeam(color, { isYouTeam: true });   // gets the talisman
+      teamCache.playerColor = color;
+    }
+    return teamCache.player;
+  },
+  cpu(color, reshuffle) {
+    if (reshuffle || !teamCache.cpu || teamCache.cpuColor !== color) {
+      teamCache.cpu = makeTeam(color);
+      teamCache.cpuColor = color;
+    }
+    return teamCache.cpu;
+  },
+};
+
+// ─── UI: tabs + controls + stage ──────────────────────────────────────────
+let activeKey = 'kickoff';
+let loopState = false;        // persists across tab switches
+let loopTimer = null;         // setTimeout handle for the auto-replay
+
+function renderTabs() {
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = '';
+  Object.keys(SCENES).forEach(key => {
+    const btn = document.createElement('button');
+    btn.className = 'tab' + (key === activeKey ? ' active' : '');
+    btn.textContent = SCENES[key].label;
+    btn.addEventListener('click', () => selectTab(key));
+    tabs.appendChild(btn);
+  });
+}
+
+function renderControls() {
+  const host = document.getElementById('controls');
+  host.innerHTML = '';
+  const scene = SCENES[activeKey];
+
+  scene.controls.forEach(c => {
+    const wrap = document.createElement('label');
+    wrap.textContent = c.label + ' ';
+    let input;
+    if (c.type === 'select') {
+      input = document.createElement('select');
+      c.options.forEach(([val, lbl]) => {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = lbl;
+        if (val === c.default) opt.selected = true;
+        input.appendChild(opt);
+      });
+    } else if (c.type === 'checkbox') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = !!c.default;
+    } else {
+      input = document.createElement('input');
+      input.type = c.type;
+      input.value = c.default;
+      if (c.min != null) input.min = c.min;
+      if (c.max != null) input.max = c.max;
+    }
+    input.dataset.key = c.key;
+    input.dataset.type = c.type;
+    wrap.appendChild(input);
+    host.appendChild(wrap);
+  });
+
+  // Global controls (always appended): Loop toggle + Play button
+  const loopLabel = document.createElement('label');
+  const loopCb = document.createElement('input');
+  loopCb.type = 'checkbox';
+  loopCb.id = 'loopToggle';
+  loopCb.checked = loopState;
+  loopCb.addEventListener('change', e => {
+    loopState = e.target.checked;
+    if (!loopState) clearTimeout(loopTimer);
+  });
+  loopLabel.appendChild(loopCb);
+  loopLabel.appendChild(document.createTextNode(' 🔁 Loop'));
+  host.appendChild(loopLabel);
+
+  const playBtn = document.createElement('button');
+  playBtn.textContent = '▶ Play scene';
+  playBtn.addEventListener('click', play);
+  host.appendChild(playBtn);
+}
+
+function readValues() {
+  const values = {};
+  document.querySelectorAll('#controls [data-key]').forEach(el => {
+    const k = el.dataset.key;
+    const t = el.dataset.type;
+    if (t === 'checkbox') values[k] = el.checked;
+    else if (t === 'number') values[k] = parseInt(el.value, 10);
+    else values[k] = el.value;
+  });
+  return values;
+}
+
+function play() {
+  clearTimeout(loopTimer);   // cancel any pending auto-replay before starting fresh
+
+  const scene = SCENES[activeKey];
+  const payload = scene.build(readValues());
+
+  const host = document.getElementById('scene');
+  host.innerHTML = '';
+  const draw = SVG().addTo(host).size('100%', '100%').viewbox(0, 0, 100, 100);
+
+  const fn = DramaticScenes[activeKey];
+  if (typeof fn !== 'function') {
+    host.innerHTML = `<div style="padding:20px;color:#f88">Scene "${activeKey}" not found in DramaticScenes</div>`;
+    return;
+  }
+  let duration;
+  try {
+    duration = fn(draw, payload) || 1500;
+  } catch (e) {
+    console.error(`Scene "${activeKey}" threw:`, e);
+    host.innerHTML = `<div style="padding:20px;color:#f88;font-family:monospace;font-size:12px">Scene "${activeKey}" threw: ${e.message}<br><br>${(e.stack || '').replace(/\n/g, '<br>')}</div>`;
+    return;
+  }
+
+  // Auto-replay if the Loop toggle is on. Useful for short / transient scenes
+  // (goal, redCard, etc.) that finish in under a second and would otherwise
+  // require manual re-clicking to see again.
+  if (loopState) {
+    loopTimer = setTimeout(play, duration + 600);
+  }
+}
+
+function selectTab(key) {
+  clearTimeout(loopTimer);   // stop replaying the old scene
+  activeKey = key;
+  renderTabs();
+  renderControls();
+  play();
+}
+
+function init() {
+  renderTabs();
+  renderControls();
+  play();
+}
+
+// Boot the UI immediately. AvatarGenerator (loaded asynchronously via the hidden
+// iframe) is not required for the page to function — kickoff falls back to plain
+// skin-circle heads until the iframe finishes, then upgrades.
+init();
+</script>
+</body>
+</html>

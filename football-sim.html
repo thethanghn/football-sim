@@ -225,6 +225,22 @@
             background: rgba(255,215,0,0.10);
         }
 
+        /* Dramatic SVG event overlay — short animated scenes on critical-tier events.
+           Sits over the pitch canvas, below the celebration screen. */
+        .dramatic-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            background: transparent;
+            overflow: hidden;
+        }
+        .dramatic-overlay svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
         /* Debug zone-grid overlay — shown on triple-clicking the match clock */
         .debug-overlay {
             position: absolute;
@@ -512,6 +528,13 @@
             border-color: var(--c-border-gold) !important;
             box-shadow: 0 0 8px rgba(255,215,0,0.25) !important;
         }
+
+        .mute-btn {
+            padding: 7px 12px !important;
+            font-size: 15px !important;
+            min-width: 40px;
+        }
+        .mute-btn.muted { opacity: 0.55; }
 
         /* ═══════════════════════════════════════════════════════
            MANAGEMENT SCREEN
@@ -1490,6 +1513,9 @@
     </style>
 </head>
 <body>
+    <!-- Phaser canvas — small spinning football pinned to the top-right corner,
+         proves the Phaser integration is alive without touching the match engine. -->
+    <div id="phaserBadge" style="position: fixed; top: 8px; right: 8px; width: 40px; height: 40px; z-index: 999; pointer-events: none;"></div>
     <div class="container">
         <h1>⚽ Football Match Simulator</h1>
 
@@ -1545,7 +1571,12 @@
             <div class="match-content">
                 <!-- Pitch Visualization -->
                 <div class="pitch-container">
-                    <svg id="pitchSVG"></svg>
+                    <div id="pitchSVG"></div>
+
+                    <!-- Dramatic SVG overlay: red card / disallowed goal / penalty award /
+                         injury / goal flash. Mounted by DramaticOverlay; sits between the
+                         Phaser canvas and the celebration screen. -->
+                    <div id="dramaticOverlay" class="dramatic-overlay" style="display:none;"></div>
 
                     <!-- Debug overlay: triple-click the match clock to toggle.
                          Renders a 5×3 grid of zones (5 vertical bands × 3 lateral lanes).
@@ -1759,6 +1790,7 @@
                     <button class="btn-secondary speed-btn" data-speed="normal">▶️ Normal</button>
                     <button class="btn-secondary speed-btn active" data-speed="fast">⚡ Fast</button>
                 </div>
+                <button class="btn-secondary mute-btn" id="muteBtn" title="Mute sounds" aria-label="Mute sounds">🔊</button>
                 <button class="btn-secondary" id="pauseBtn">Pause</button>
                 <button class="btn-secondary" id="manageBtn" style="display: none;">Manage Team</button>
                 <button class="btn-primary" id="endBtn" style="display: none;">Match Ended</button>
@@ -2188,9 +2220,28 @@
         </div>
     </div>
 
+    <!-- Third-party libraries (must load before our app code) -->
+    <!-- Phaser.js — 2D game framework (canvas / WebGL). Exposes global `Phaser`. -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
+    <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
+
+    <script src="audio.js"></script>
+    <script src="dramatic.js"></script>
+    <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
+    <script src="dramatic-scenes/_helpers.js"></script>
+    <script src="dramatic-scenes/goal.js"></script>
+    <script src="dramatic-scenes/freekick.js"></script>
+    <script src="dramatic-scenes/kickoff.js"></script>
+    <script src="dramatic-scenes/corner.js"></script>
+    <script src="dramatic-scenes/redCard.js"></script>
+    <script src="dramatic-scenes/disallowed.js"></script>
+    <script src="dramatic-scenes/penalty.js"></script>
+    <script src="dramatic-scenes/injury.js"></script>
     <script src="random.js"></script>
     <script src="game-flow.js"></script>
     <script src="zone-strength.js"></script>
     <script src="football-sim.js"></script>
+    <script src="phaser-badge.js"></script>
 </body>
 </html>

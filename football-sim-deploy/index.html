@@ -216,7 +216,74 @@
             border: 1px solid rgba(255,68,68,0.4);
             border-radius: var(--r-sm);
             font-variant-numeric: tabular-nums;
+            cursor: pointer;
+            user-select: none;
         }
+        .timer.debug-active {
+            border-color: var(--c-gold);
+            color: var(--c-gold);
+            background: rgba(255,215,0,0.10);
+        }
+
+        /* Dramatic SVG event overlay — short animated scenes on critical-tier events.
+           Sits over the pitch canvas, below the celebration screen. */
+        .dramatic-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            background: transparent;
+            overflow: hidden;
+        }
+        .dramatic-overlay svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Debug zone-grid overlay — shown on triple-clicking the match clock */
+        .debug-overlay {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            pointer-events: none;
+            z-index: 5;
+        }
+        .debug-cell {
+            background: rgba(0, 0, 0, 0.18);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            position: relative;
+            /* Single-side borders to avoid doubling up where cells meet */
+            border-right:  1px dashed rgba(255, 255, 255, 0.30);
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.30);
+        }
+        /* Drop the trailing borders on the right column / bottom row */
+        .debug-overlay .debug-cell:nth-child(5n)         { border-right:  none; }
+        .debug-overlay .debug-cell:nth-last-child(-n+5)  { border-bottom: none; }
+        .debug-cell-coord {
+            position: absolute;
+            top: 2px; left: 4px;
+            font-size: 8px;
+            color: rgba(255,255,255,0.35);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .debug-num {
+            font-size: clamp(13px, 2.2vw, 22px);
+            font-weight: 900;
+            line-height: 1.05;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 0 5px rgba(0,0,0,0.4);
+            font-variant-numeric: tabular-nums;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .debug-num.empty { opacity: 0.25; font-weight: 600; }
 
         /* ── Pitch ─── */
         .match-content {
@@ -275,6 +342,52 @@
             overflow-y: auto;
             border: 1px solid var(--c-border-gold);
         }
+
+        /* Priority filter bar above the event log */
+        .event-log-filter {
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            background: var(--c-bg-2);
+            border: 1px solid var(--c-border-gold);
+            border-bottom: none;
+            border-radius: var(--r-sm) var(--r-sm) 0 0;
+            margin-bottom: 0;
+        }
+        .event-log-filter-btn {
+            flex: 1;
+            padding: 5px 8px !important;
+            font-size: 10px !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            color: var(--c-text-2) !important;
+            border-radius: var(--r-sm) !important;
+            letter-spacing: 0.5px !important;
+            text-transform: uppercase;
+            font-weight: 700 !important;
+            cursor: pointer;
+        }
+        .event-log-filter-btn:hover:not(.active) {
+            color: var(--c-gold) !important;
+            background: var(--c-bg-3) !important;
+        }
+        .event-log-filter-btn.active {
+            background: var(--c-bg-4) !important;
+            color: var(--c-gold) !important;
+            border-color: var(--c-border-gold) !important;
+        }
+
+        /* Per-priority visual tiers — most "important" events look biggest/brightest */
+        .event-pri-critical {
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.2px;
+            box-shadow: 0 0 0 1px rgba(255,215,0,0.5), 0 0 6px rgba(255,215,0,0.18);
+        }
+        .event-pri-high   { font-weight: 600; font-size: 13px; }
+        .event-pri-medium { font-size: 12.5px; }
+        .event-pri-low    { font-size: 11.5px; opacity: 0.78; }
+        .event-pri-flavor { font-size: 11px; font-style: italic; opacity: 0.55; }
 
         .events-log::-webkit-scrollbar { width: 4px; }
         .events-log::-webkit-scrollbar-track { background: var(--c-bg-0); }
@@ -385,6 +498,44 @@
             border-color: var(--c-gold);
         }
 
+        .speed-controls {
+            display: flex;
+            gap: 4px;
+            background: var(--c-bg-2);
+            border: 1px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 3px;
+        }
+
+        .speed-btn {
+            padding: 7px 12px !important;
+            font-size: 12px !important;
+            border: 1px solid transparent !important;
+            background: transparent !important;
+            color: var(--c-text-2) !important;
+            border-radius: var(--r-sm) !important;
+            letter-spacing: 0 !important;
+        }
+
+        .speed-btn:hover:not(.active) {
+            color: var(--c-gold) !important;
+            background: var(--c-bg-3) !important;
+        }
+
+        .speed-btn.active {
+            background: var(--c-bg-4) !important;
+            color: var(--c-gold) !important;
+            border-color: var(--c-border-gold) !important;
+            box-shadow: 0 0 8px rgba(255,215,0,0.25) !important;
+        }
+
+        .mute-btn {
+            padding: 7px 12px !important;
+            font-size: 15px !important;
+            min-width: 40px;
+        }
+        .mute-btn.muted { opacity: 0.55; }
+
         /* ═══════════════════════════════════════════════════════
            MANAGEMENT SCREEN
         ════════════════════════════════════════════════════════ */
@@ -474,25 +625,84 @@
         .player-item.selected .player-position { color: var(--c-text-2); }
 
         .player-number {
-            background: var(--c-red);
-            color: #fff;
+            background: var(--c-bg-2);
+            color: var(--c-text-1);
             width: 32px;
             height: 32px;
             border-radius: var(--r-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
-            font-weight: 700;
+            font-size: 13px;
+            font-weight: 800;
             border: 1px solid var(--c-border-gold);
             flex-shrink: 0;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.45);
         }
 
         .player-item.selected .player-number {
             background: var(--c-gold);
-            color: #000;
+            color: #000 !important;
             border-color: transparent;
+            text-shadow: none;
         }
+
+        /* PES-style match-day morale arrow (red ↑ best → purple ↓ worst).
+           SVG-based — drawn as a chunky filled shape with a black outline so it reads at small
+           sizes. The wrapper is a flex inline container that keeps the SVG vertically centred. */
+        .morale-arrow {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+            margin-left: 4px;
+            line-height: 0;
+        }
+        .morale-arrow .morale-arrow-svg {
+            filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6));
+        }
+        .fm-morale-arrow {
+            position: absolute;
+            top: -9px; right: -3px;
+            line-height: 0;
+            pointer-events: none;
+            z-index: 3;
+        }
+        .fm-morale-arrow .morale-arrow-svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+        }
+
+        /* Player Detail form line — sits below age/height */
+        .player-detail-form {
+            font-size: 12px;
+            color: var(--c-text-2);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: 0.3px;
+        }
+        .player-detail-form .morale-arrow-svg {
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7));
+        }
+
+        /* Compact stamina bar — used in bench player items and formation-pitch slots */
+        .stamina-bar {
+            width: 100%;
+            height: 3px;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 3px;
+        }
+        .stamina-bar-fill {
+            height: 100%;
+            border-radius: 1px;
+            transition: width 0.35s ease, background 0.35s ease;
+        }
+        /* In the formation-pitch slot, narrow the bar so it sits cleanly under the meta line */
+        .fm-player-slot .stamina-bar { width: 88%; margin: 2px auto 0; }
 
         .category-header {
             padding: 3px 10px;
@@ -670,6 +880,100 @@
             pointer-events: none; z-index: 2;
         }
 
+        /* CM 01/02-style movement arrows: long dashed lines drawn over the pitch */
+        .fm-arrows-overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+            overflow: visible;
+            filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.55));
+        }
+
+        /* Drag-and-drop visual states */
+        .fm-player-slot.dragging,
+        .player-item.dragging      { opacity: 0.4; }
+        .fm-player-slot.drop-target,
+        .player-item.drop-target   { outline: 2px dashed var(--c-gold); outline-offset: 2px; background: rgba(255,215,0,0.18); }
+        .fm-pitch.drop-active      { box-shadow: inset 0 0 0 2px rgba(255,215,0,0.35); }
+        .squad-list.drop-active    { background: rgba(255,215,0,0.06); }
+
+        /* Floating context menu (right-click style) on player slot click */
+        .context-menu {
+            position: fixed;
+            min-width: 200px;
+            background: var(--c-bg-2);
+            border: 2px solid var(--c-gold);
+            border-radius: var(--r-md);
+            box-shadow: 0 8px 22px rgba(0,0,0,0.55);
+            z-index: 200;
+            padding: 6px;
+            font-size: 12px;
+        }
+        .context-menu-header {
+            color: var(--c-gold);
+            font-weight: 700;
+            padding: 6px 10px 8px;
+            border-bottom: 1px solid rgba(255,215,0,0.25);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+        .context-menu-item {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%;
+            padding: 9px 10px;
+            background: transparent;
+            border: none;
+            color: var(--c-text-1);
+            text-align: left;
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .context-menu-item:hover { background: var(--c-bg-3); color: var(--c-gold); }
+
+        /* Wider popover for the instructions panel; narrower one for the arrow grid */
+        .context-menu.popover-wide  { min-width: 260px; max-width: 320px; padding: 10px; }
+        .context-menu.popover-arrow { min-width: 160px; padding: 8px; }
+        .context-menu.popover-wide .tactic-row    { margin-bottom: 6px; }
+        .context-menu.popover-wide .tactic-label  { font-size: 10px; }
+        .context-menu.popover-wide .tactic-btn    { font-size: 10px; padding: 5px 6px; }
+        .context-menu.popover-arrow .arrow-picker { margin-top: 0; }
+
+        /* Compact arrow direction picker (3×3 compass) used inside instructions */
+        .arrow-picker {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .arrow-picker-cell {
+            aspect-ratio: 1 / 1;
+            background: var(--c-bg-3);
+            border: 1px solid var(--c-border-gold);
+            color: var(--c-gold);
+            border-radius: var(--r-sm);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1;
+            padding: 0;
+            transition: background var(--t-fast), border-color var(--t-fast);
+        }
+        .arrow-picker-cell:hover { background: var(--c-bg-4); }
+        .arrow-picker-cell.active {
+            background: var(--c-gold);
+            color: #000;
+            border-color: var(--c-gold);
+        }
+        .arrow-picker-cell.clear { color: var(--c-red); font-size: 11px; }
+
         /* ── Sub / Management Info ─── */
         .management-info {
             background: var(--c-bg-2);
@@ -762,7 +1066,14 @@
         .player-detail-position {
             font-size: 13px;
             color: var(--c-green);
+            margin-bottom: 4px;
+        }
+
+        .player-detail-bio {
+            font-size: 11px;
+            color: var(--c-text-2);
             margin-bottom: 8px;
+            letter-spacing: 0.4px;
         }
 
         .player-detail-number {
@@ -842,6 +1153,116 @@
 
         .close-detail-btn:hover {
             background: rgba(255,68,68,0.22);
+        }
+
+        /* Post-match player-performance table — two columns, one per team */
+        .player-stats-table {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        .player-stats-col {
+            background: var(--c-bg-2);
+            border: 1px solid var(--c-border-gold);
+            border-radius: var(--r-md);
+            padding: 10px 8px 6px;
+            font-size: 13px;
+            color: var(--c-text-1);
+            overflow: hidden;
+        }
+        .player-stats-col .ps-team-head {
+            color: var(--c-gold);
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            padding: 4px 8px 10px;
+            border-bottom: 1px solid var(--c-border-gold);
+            margin-bottom: 6px;
+            font-size: 14px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        }
+        .player-stats-row {
+            display: grid;
+            grid-template-columns: 2.2fr repeat(5, 1fr);
+            gap: 4px;
+            align-items: center;
+            padding: 7px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            font-variant-numeric: tabular-nums;
+            border-radius: 3px;
+        }
+        .player-stats-row:nth-of-type(even):not(.header) {
+            background: rgba(255,255,255,0.04);
+        }
+        .player-stats-row.header {
+            color: rgba(255,215,0,0.95);
+            font-weight: 800;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            padding: 4px 8px 8px;
+            border-bottom-color: rgba(255,215,0,0.25);
+            background: transparent !important;
+        }
+        .player-stats-row .ps-name {
+            color: #FFFFFF;
+            font-weight: 600;
+            font-size: 13px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .player-stats-row .ps-num {
+            text-align: center;
+            font-weight: 700;
+            font-size: 14px;
+            color: #EEF3EE;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+        }
+        .player-stats-row .ps-num.zero { color: rgba(238,243,238,0.35); font-weight: 500; }
+
+        @media (max-width: 640px) {
+            .player-stats-table { grid-template-columns: 1fr !important; }
+            .player-stats-row { font-size: 12px; padding: 6px 6px; }
+            .player-stats-row .ps-num { font-size: 13px; }
+        }
+
+        /* Player detail OVERLAY — sits on top of the formation pitch */
+        .player-detail-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(8, 16, 10, 0.94);
+            border: 2px solid var(--c-gold);
+            border-radius: var(--r-md);
+            z-index: 20;
+            overflow-y: auto;
+            padding: 14px 14px 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+        }
+        .player-detail-overlay .player-detail-header { margin-bottom: 12px; }
+        .player-detail-overlay .radar-chart-container { margin: 0 auto 10px; }
+        .player-detail-overlay .attribute-bars { margin-bottom: 6px; }
+        .player-detail-close-x {
+            position: absolute;
+            top: 6px; right: 8px;
+            width: 28px; height: 28px;
+            padding: 0;
+            background: var(--c-red-dim);
+            color: var(--c-red);
+            border: 1px solid var(--c-red);
+            border-radius: 50%;
+            font-size: 18px;
+            font-weight: 800;
+            line-height: 1;
+            cursor: pointer;
+            z-index: 21;
+            display: flex; align-items: center; justify-content: center;
+            transition: background var(--t-fast);
+        }
+        .player-detail-close-x:hover {
+            background: rgba(255, 68, 68, 0.28);
+            color: #fff;
         }
 
         /* ═══════════════════════════════════════════════════════
@@ -1030,28 +1451,25 @@
             #managementScreen > div:first-child { margin-bottom: 8px !important; gap: 8px !important; }
             #managementTitle { font-size: 13px !important; letter-spacing: 1px !important; }
 
-            #managementScreen > div:nth-child(3) {
-                grid-template-columns: 1fr 1fr !important;
-                grid-template-rows: auto auto !important;
+            #mgmtMainGrid {
+                grid-template-columns: 1fr !important;
+                grid-auto-rows: auto !important;
                 overflow: visible !important;
-                min-height: 0; gap: 6px !important;
+                min-height: 0; gap: 8px !important;
             }
-            #managementScreen > div:nth-child(3) > .squad-section:first-child { grid-column: 1; grid-row: 1; max-height: 44vh; }
-            #managementScreen > div:nth-child(3) > .squad-section:last-child  { grid-column: 2; grid-row: 1; max-height: 44vh; }
-            #managementScreen > div:nth-child(3) > div:not(.squad-section)    { grid-column: 1 / -1; grid-row: 2; overflow: visible; }
+            #mgmtMainGrid > .squad-section { max-height: 32vh; }
+            #mgmtRightStack {
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 8px !important;
+                overflow: visible !important;
+            }
+            #mgmtRightStack > .squad-section { max-height: 50vh; }
+            #mgmtSettingsPane { overflow-y: visible !important; }
 
-            #playerDetailPanel { display: none !important; }
             #instructionPanel  { display: none !important; }
-
-            #mobilePlayerDetail {
-                display: block !important;
-                max-height: 45vh; overflow-y: auto;
-                margin-bottom: 6px; flex-shrink: 0;
-                background: var(--c-bg-2);
-                border: 2px solid var(--c-border-gold);
-                border-radius: var(--r-md);
-                padding: 12px;
-            }
+            #mobilePlayerDetail { display: none !important; }
+            .player-detail-overlay { padding: 10px; }
 
             .player-item { min-height: 40px; padding: 4px 6px; }
             .player-item svg { width: 30px !important; height: 30px !important; }
@@ -1062,7 +1480,7 @@
             .category-header { font-size: 9px; }
 
             #mgmtStartBtn { padding: 12px !important; font-size: 13px !important; }
-            #confirmSubBtn, #closeManageBtn { padding: 10px 8px; font-size: 12px; }
+            #closeManageBtn { padding: 10px 8px; font-size: 12px; }
             .management-info { font-size: 11px; padding: 8px; }
 
             /* ── Match ── */
@@ -1095,6 +1513,9 @@
     </style>
 </head>
 <body>
+    <!-- Phaser canvas — small spinning football pinned to the top-right corner,
+         proves the Phaser integration is alive without touching the match engine. -->
+    <div id="phaserBadge" style="position: fixed; top: 8px; right: 8px; width: 40px; height: 40px; z-index: 999; pointer-events: none;"></div>
     <div class="container">
         <h1>⚽ Football Match Simulator</h1>
 
@@ -1150,7 +1571,17 @@
             <div class="match-content">
                 <!-- Pitch Visualization -->
                 <div class="pitch-container">
-                    <svg id="pitchSVG"></svg>
+                    <div id="pitchSVG"></div>
+
+                    <!-- Dramatic SVG overlay: red card / disallowed goal / penalty award /
+                         injury / goal flash. Mounted by DramaticOverlay; sits between the
+                         Phaser canvas and the celebration screen. -->
+                    <div id="dramaticOverlay" class="dramatic-overlay" style="display:none;"></div>
+
+                    <!-- Debug overlay: triple-click the match clock to toggle.
+                         Renders a 5×3 grid of zones (5 vertical bands × 3 lateral lanes).
+                         Each cell shows both teams' combined player strength in that zone. -->
+                    <div id="debugOverlay" class="debug-overlay" style="display:none;"></div>
                     <div id="celebrationScreen" style="display:none; position:absolute; inset:0;">
                         <div class="cel-wrap">
                             <!-- Stadium background SVG -->
@@ -1323,8 +1754,13 @@
 
                 <!-- Right Sidebar: Events, Formation, Stats -->
                 <div class="match-sidebar">
+                    <div class="event-log-filter">
+                        <button class="event-log-filter-btn active" data-filter="all" onclick="window.game.setEventLogFilter('all')">All</button>
+                        <button class="event-log-filter-btn" data-filter="important" onclick="window.game.setEventLogFilter('important')">Important</button>
+                        <button class="event-log-filter-btn" data-filter="critical" onclick="window.game.setEventLogFilter('critical')">Critical</button>
+                    </div>
                     <div class="events-log" id="eventsLog">
-                        <div class="event pass">⚪ Match started! Possession: 50-50</div>
+                        <div class="event pass event-pri-low">⚪ Match started! Possession: 50-50</div>
                     </div>
 
                     <div class="stats" id="stats">
@@ -1349,6 +1785,12 @@
             </div>
 
             <div class="buttons">
+                <div class="speed-controls" id="speedControls">
+                    <button class="btn-secondary speed-btn" data-speed="slow">🐢 Slow</button>
+                    <button class="btn-secondary speed-btn" data-speed="normal">▶️ Normal</button>
+                    <button class="btn-secondary speed-btn active" data-speed="fast">⚡ Fast</button>
+                </div>
+                <button class="btn-secondary mute-btn" id="muteBtn" title="Mute sounds" aria-label="Mute sounds">🔊</button>
                 <button class="btn-secondary" id="pauseBtn">Pause</button>
                 <button class="btn-secondary" id="manageBtn" style="display: none;">Manage Team</button>
                 <button class="btn-primary" id="endBtn" style="display: none;">Match Ended</button>
@@ -1574,6 +2016,26 @@
             </div>
         </div>
 
+        <!-- Floating context menu (shown on clicking a starting-XI slot) -->
+        <div id="playerContextMenu" class="context-menu" style="display:none;" role="menu">
+            <div class="context-menu-header" id="playerContextMenuTitle">Player</div>
+            <button class="context-menu-item" data-action="details" type="button">📋 View Details</button>
+            <button class="context-menu-item" data-action="instructions" type="button">⚙ Set Instructions</button>
+            <button class="context-menu-item" data-action="arrow" type="button">🎯 Set Movement Arrow</button>
+        </div>
+
+        <!-- Floating instructions popover -->
+        <div id="playerInstructionsMenu" class="context-menu popover-wide" style="display:none;">
+            <div class="context-menu-header" id="playerInstructionsMenuTitle">Instructions</div>
+            <div id="playerInstructionsMenuBody"></div>
+        </div>
+
+        <!-- Floating movement-arrow popover -->
+        <div id="playerArrowMenu" class="context-menu popover-arrow" style="display:none;">
+            <div class="context-menu-header" id="playerArrowMenuTitle">Movement Arrow</div>
+            <div id="playerArrowMenuBody"></div>
+        </div>
+
         <!-- Management Panel Screen -->
         <div class="screen active" id="managementScreen" style="flex-direction: column; height: 100%; overflow: hidden; padding: 20px;">
             <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 15px; flex-shrink: 0;">
@@ -1584,17 +2046,31 @@
             <!-- Mobile-only player detail panel (shown between title and squad lists) -->
             <div id="mobilePlayerDetail"></div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; flex: 1; overflow: hidden; min-height: 0;">
-                <!-- LEFT COLUMN: FORMATION PITCH VIEW -->
-                <div class="squad-section" style="padding: 0; overflow: hidden; display: flex; flex-direction: column;">
-                    <div class="squad-title" style="border-radius: 0; flex-shrink: 0;">⚽ STARTING XI</div>
-                    <div id="formationPitch" class="fm-pitch"></div>
+            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px; flex: 1; overflow: hidden; min-height: 0;" id="mgmtMainGrid">
+                <!-- LEFT (1/3): PLAYER LIST -->
+                <div class="squad-section">
+                    <div class="squad-title">👥 PLAYERS</div>
+                    <div class="squad-list" id="benchList"></div>
                 </div>
 
-                <!-- CENTER COLUMN: FORMATION (PRE-MATCH) / DETAILS / INSTRUCTIONS / CONTROLS -->
-                <div style="display: flex; flex-direction: column; gap: 15px; overflow: hidden;">
-                    <!-- Formation Selector (pre-match only) -->
-                    <div id="mgmtFormationSelector" style="flex-shrink: 0; display: none;">
+                <!-- RIGHT (2/3): stacked top = formation (2/3 height), bottom = settings (1/3 height) -->
+                <div style="display: grid; grid-template-rows: 2fr 1fr; gap: 15px; overflow: hidden; min-height: 0;" id="mgmtRightStack">
+                    <!-- TOP HALF: STARTING XI -->
+                    <div class="squad-section" style="padding: 0; overflow: hidden; display: flex; flex-direction: column; position: relative;">
+                        <div class="squad-title" style="border-radius: 0; flex-shrink: 0;">⚽ STARTING XI</div>
+                        <div id="formationPitch" class="fm-pitch"></div>
+
+                        <!-- Player detail overlay (covers formation pitch on click) -->
+                        <div id="playerDetailOverlay" class="player-detail-overlay" style="display: none;">
+                            <button class="player-detail-close-x" id="playerDetailCloseX" type="button" aria-label="Close">×</button>
+                            <div id="playerDetailOverlayContent"></div>
+                        </div>
+                    </div>
+
+                    <!-- BOTTOM HALF: SETTINGS -->
+                    <div style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; padding-right: 4px;" id="mgmtSettingsPane">
+                        <!-- Formation Selector (pre-match only) -->
+                        <div id="mgmtFormationSelector" style="flex-shrink: 0; display: none;">
                         <div style="color: #FFD700; font-weight: bold; font-size: 11px; text-align: center; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 1px;">⚙ Formation</div>
                         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;">
                             <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-4-2<div class="formation-desc">Balanced</div></button>
@@ -1605,29 +2081,6 @@
                             <button class="formation-btn" data-formation="352" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-5-2<div class="formation-desc">Mid Power</div></button>
                             <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-4-3<div class="formation-desc">Attack</div></button>
                         </div>
-                    </div>
-
-                    <!-- Player Details -->
-                    <div class="player-detail-panel" id="playerDetailPanel" style="flex: 1; overflow-y: auto; min-height: 0;">
-                        <div style="text-align: center; color: #FFD700; padding: 20px; font-weight: bold;">
-                            Tap a player to view details
-                        </div>
-                        <div class="player-detail-header" style="display: none;" id="playerDetailHeader">
-                            <div class="player-detail-avatar" id="playerDetailAvatar"></div>
-                            <div class="player-detail-info">
-                                <div class="player-detail-name" id="playerDetailName"></div>
-                                <div class="player-detail-position" id="playerDetailPosition"></div>
-                                <div class="player-detail-number" id="playerDetailNumber"></div>
-                            </div>
-                        </div>
-
-                        <div class="radar-chart-container" style="display: none;" id="radarChartContainer">
-                            <svg id="radarChart" width="200" height="200" viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg"></svg>
-                        </div>
-
-                        <div class="attribute-bars" id="attributeBars" style="display: none;"></div>
-
-                        <button class="close-detail-btn" id="closeDetailBtn" style="display: none;">Close Details</button>
                     </div>
 
                     <!-- Tactics Panel (CM 03/04 style) -->
@@ -1672,27 +2125,43 @@
                                 <button class="tactic-btn" data-tactic="passing" data-value="short">Short</button>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Substitution Controls (in-match only) -->
-                    <div id="subControls" style="flex-shrink: 0; display: none;">
-                        <div class="management-info" id="managementInfo">👤 SELECT PLAYERS TO SWAP</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
-                            <button class="btn-primary" id="confirmSubBtn" disabled>Confirm Sub</button>
-                            <button class="btn-secondary" id="closeManageBtn">Close</button>
+                        <div class="tactic-row">
+                            <span class="tactic-label">Marking</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn active" data-tactic="marking" data-value="zonal">Zonal</button>
+                                <button class="tactic-btn" data-tactic="marking" data-value="man">Man</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Time Wasting</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn" data-tactic="timeWasting" data-value="never">Never</button>
+                                <button class="tactic-btn active" data-tactic="timeWasting" data-value="mixed">Mixed</button>
+                                <button class="tactic-btn" data-tactic="timeWasting" data-value="often">Often</button>
+                            </div>
+                        </div>
+
+                        <div class="tactic-row">
+                            <span class="tactic-label">Counter Attack</span>
+                            <div class="tactic-options">
+                                <button class="tactic-btn active" data-tactic="counterAttack" data-value="no">No</button>
+                                <button class="tactic-btn" data-tactic="counterAttack" data-value="yes">Yes</button>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Start Match Button (pre-match only) -->
-                    <div id="startMatchSection" style="flex-shrink: 0; display: none;">
-                        <button class="btn-primary" id="mgmtStartBtn" onclick="window.game.startMatch()" style="width: 100%; padding: 14px; font-size: 15px; letter-spacing: 2px; text-transform: uppercase;">▶ Start Match</button>
+                    <!-- Close Button (in-match only) — Confirm Sub & info bar removed; subs auto-apply on selection -->
+                    <div id="subControls" style="flex-shrink: 0; display: none;">
+                        <button class="btn-secondary" id="closeManageBtn" style="width: 100%;">Close</button>
                     </div>
-                </div>
 
-                <!-- RIGHT COLUMN: BENCH -->
-                <div class="squad-section">
-                    <div class="squad-title">🔄 BENCH</div>
-                    <div class="squad-list" id="benchList"></div>
+                        <!-- Start Match Button (pre-match only) -->
+                        <div id="startMatchSection" style="flex-shrink: 0; display: none;">
+                            <button class="btn-primary" id="mgmtStartBtn" onclick="window.game.startMatch()" style="width: 100%; padding: 14px; font-size: 15px; letter-spacing: 2px; text-transform: uppercase;">▶ Start Match</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1735,6 +2204,14 @@
                     <h3>📋 Cards</h3>
                     <div id="cardsList"></div>
                 </div>
+
+                <div id="playerStatsSection" style="display: none; margin-bottom: 16px;">
+                    <h3>📊 Player Performance</h3>
+                    <div class="player-stats-table">
+                        <div class="player-stats-col" id="playerStatsLeft"></div>
+                        <div class="player-stats-col" id="playerStatsRight"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="buttons">
@@ -1743,7 +2220,28 @@
         </div>
     </div>
 
+    <!-- Third-party libraries (must load before our app code) -->
+    <!-- Phaser.js — 2D game framework (canvas / WebGL). Exposes global `Phaser`. -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
+    <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
+
+    <script src="audio.js"></script>
+    <script src="dramatic.js"></script>
+    <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
+    <script src="dramatic-scenes/_helpers.js"></script>
+    <script src="dramatic-scenes/goal.js"></script>
+    <script src="dramatic-scenes/freekick.js"></script>
+    <script src="dramatic-scenes/kickoff.js"></script>
+    <script src="dramatic-scenes/corner.js"></script>
+    <script src="dramatic-scenes/redCard.js"></script>
+    <script src="dramatic-scenes/disallowed.js"></script>
+    <script src="dramatic-scenes/penalty.js"></script>
+    <script src="dramatic-scenes/injury.js"></script>
+    <script src="random.js"></script>
     <script src="game-flow.js"></script>
+    <script src="zone-strength.js"></script>
     <script src="football-sim.js"></script>
+    <script src="phaser-badge.js"></script>
 </body>
 </html>

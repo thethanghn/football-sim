@@ -1,128 +1,104 @@
+        // Phaser-backed pitch renderer. Public API surface (createPitchSVG / renderPlayer /
+        // updatePlayerPosition / renderBall / updateStamina / getPixelCoords / getPitchCoords /
+        // calculatePositions) and the shapes of `playerVisuals[id]` / `ballElement` are
+        // preserved so the rest of the codebase — AnimationEngine, MatchFlow's _animBall, the
+        // simulator's setup code — works unchanged. The SVG element is replaced by a Phaser
+        // canvas; SVG attribute access (`setAttribute('cx', ...)` / `setAttribute('transform',
+        // ...)`) is provided via compatibility shims on the visual / ball objects.
         class PitchRenderer {
             constructor() {
                 this.width = 800;
                 this.height = 500;
                 this.pitchWidth = 100;
                 this.pitchHeight = 100;
-                this.svg = null;
                 this.playerVisuals = {};
                 this.ballElement = null;
+                this.svg = null;          // kept for backwards-compat readers; not used by Phaser
+                this.game = null;
+                this.scene = null;
+                this._sceneReady = false;
+                this._pending = [];       // ops queued until Phaser scene is ready
+            }
+
+            // Async-ready helper. Defers `fn` until the Phaser scene is set up.
+            _enqueue(fn) {
+                if (this._sceneReady) fn();
+                else this._pending.push(fn);
             }
 
             createPitchSVG(containerId) {
                 const container = document.getElementById(containerId);
                 if (!container) return;
-
-                this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                this.svg.setAttribute('viewBox', `0 0 ${this.width} ${this.height}`);
-                this.svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-                this.svg.style.width = '100%';
-                this.svg.style.height = '100%';
-
                 container.innerHTML = '';
-                container.appendChild(this.svg);
 
-                this.drawPitchLines();
-                return this.svg;
+                // Reset state on re-init (new match without page reload).
+                this.playerVisuals = {};
+                this.ballElement = null;
+                this._sceneReady = false;
+                this._pending = [];
+                if (this.game) { try { this.game.destroy(true, false); } catch (e) {} this.game = null; }
+
+                const self = this;
+                this.game = new Phaser.Game({
+                    type: Phaser.AUTO,
+                    width: this.width,
+                    height: this.height,
+                    parent: container,
+                    transparent: true,
+                    backgroundColor: 0x1a7a1a,
+                    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+                    scene: {
+                        create() {
+                            self.scene = this;
+                            self._drawPitchLines();
+                            self._sceneReady = true;
+                            // Flush any operations queued before the scene was ready
+                            const queued = self._pending.slice();
+                            self._pending = [];
+                            queued.forEach(fn => fn());
+                        }
+                    }
+                });
+                return null;
             }
 
-            drawPitchLines() {
-                const svg = this.svg;
-                const w = this.width;
-                const h = this.height;
-                const margin = 20;
-
-                // Pitch background
-                const pitch = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                pitch.setAttribute('x', margin);
-                pitch.setAttribute('y', margin);
-                pitch.setAttribute('width', w - 2*margin);
-                pitch.setAttribute('height', h - 2*margin);
-                pitch.setAttribute('fill', '#1a7a1a');
-                pitch.setAttribute('stroke', '#fff');
-                pitch.setAttribute('stroke-width', '2');
-                svg.appendChild(pitch);
-
-                const x1 = margin, x2 = w - margin, y1 = margin, y2 = h - margin;
+            _drawPitchLines() {
+                const g = this.scene.add.graphics();
+                const m = 20;
+                const w = this.width, h = this.height;
+                const x1 = m, x2 = w - m, y1 = m, y2 = h - m;
                 const xMid = (x1 + x2) / 2, yMid = (y1 + y2) / 2;
-                const lineColor = '#fff';
 
-                // Helper function to add line
-                const addLine = (x1, y1, x2, y2) => {
-                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('x1', x1);
-                    line.setAttribute('y1', y1);
-                    line.setAttribute('x2', x2);
-                    line.setAttribute('y2', y2);
-                    line.setAttribute('stroke', lineColor);
-                    line.setAttribute('stroke-width', '1.5');
-                    svg.appendChild(line);
+                // Pitch outline + grass tint (the canvas already has the green background
+                // from `backgroundColor: 0x1a7a1a`, but we draw the touchline rectangle anyway).
+                g.lineStyle(2, 0xffffff, 1);
+                g.strokeRect(m, m, w - 2*m, h - 2*m);
+
+                // Centre line, centre circle, centre spot
+                g.lineStyle(1.5, 0xffffff, 1);
+                g.lineBetween(xMid, y1, xMid, y2);
+                g.strokeCircle(xMid, yMid, 40);
+                g.fillStyle(0xffffff, 1);
+                g.fillCircle(xMid, yMid, 3);
+
+                // Penalty areas + goal areas (both halves)
+                const boxWidth = 150, boxHeight = 100, goalAreaHeight = 50;
+                g.lineStyle(1.5, 0xffffff, 1);
+                g.strokeRect(x1,           yMid - boxHeight/2, boxWidth, boxHeight);
+                g.strokeRect(x2 - boxWidth, yMid - boxHeight/2, boxWidth, boxHeight);
+                g.strokeRect(x1,           yMid - goalAreaHeight/2, 60, goalAreaHeight);
+                g.strokeRect(x2 - 60,      yMid - goalAreaHeight/2, 60, goalAreaHeight);
+
+                // Corner arcs (90° quadrants)
+                const arc = (cx, cy, startA, endA) => {
+                    g.beginPath();
+                    g.arc(cx, cy, 20, Phaser.Math.DegToRad(startA), Phaser.Math.DegToRad(endA), false);
+                    g.strokePath();
                 };
-
-                // Center line
-                addLine(xMid, y1, xMid, y2);
-
-                // Center circle
-                const centerCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                centerCircle.setAttribute('cx', xMid);
-                centerCircle.setAttribute('cy', yMid);
-                centerCircle.setAttribute('r', '40');
-                centerCircle.setAttribute('fill', 'none');
-                centerCircle.setAttribute('stroke', lineColor);
-                centerCircle.setAttribute('stroke-width', '1.5');
-                svg.appendChild(centerCircle);
-
-                // Center spot
-                const centerSpot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                centerSpot.setAttribute('cx', xMid);
-                centerSpot.setAttribute('cy', yMid);
-                centerSpot.setAttribute('r', '3');
-                centerSpot.setAttribute('fill', lineColor);
-                svg.appendChild(centerSpot);
-
-                // Goal boxes and penalty areas
-                const boxWidth = 150;
-                const boxHeight = 100;
-                const goalAreaHeight = 50;
-
-                // Left penalty area
-                this.drawBox(x1, yMid - boxHeight/2, boxWidth, boxHeight, svg, lineColor);
-                // Right penalty area
-                this.drawBox(x2 - boxWidth, yMid - boxHeight/2, boxWidth, boxHeight, svg, lineColor);
-
-                // Left goal area
-                this.drawBox(x1, yMid - goalAreaHeight/2, 60, goalAreaHeight, svg, lineColor);
-                // Right goal area
-                this.drawBox(x2 - 60, yMid - goalAreaHeight/2, 60, goalAreaHeight, svg, lineColor);
-
-                // Corner arcs
-                this.drawCornerArc(x1, y1, 20, svg, lineColor);
-                this.drawCornerArc(x2, y1, 20, svg, lineColor);
-                this.drawCornerArc(x1, y2, 20, svg, lineColor);
-                this.drawCornerArc(x2, y2, 20, svg, lineColor);
-            }
-
-            drawBox(x, y, width, height, svg, color) {
-                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', x);
-                rect.setAttribute('y', y);
-                rect.setAttribute('width', width);
-                rect.setAttribute('height', height);
-                rect.setAttribute('fill', 'none');
-                rect.setAttribute('stroke', color);
-                rect.setAttribute('stroke-width', '1.5');
-                svg.appendChild(rect);
-            }
-
-            drawCornerArc(x, y, r, svg, color) {
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                const dir = x > this.width / 2 ? -1 : 1;
-                const dirV = y > this.height / 2 ? -1 : 1;
-                path.setAttribute('d', `M ${x + dir*r} ${y} A ${r} ${r} 0 0 ${dirV > 0 ? 0 : 1} ${x} ${y + dirV*r}`);
-                path.setAttribute('fill', 'none');
-                path.setAttribute('stroke', color);
-                path.setAttribute('stroke-width', '1.5');
-                svg.appendChild(path);
+                arc(x1, y1,   0,  90);   // top-left
+                arc(x2, y1,  90, 180);   // top-right
+                arc(x2, y2, 180, 270);   // bottom-right
+                arc(x1, y2, 270, 360);   // bottom-left
             }
 
             getPixelCoords(pitchX, pitchY) {
@@ -174,89 +150,63 @@
                 return Array.from({ length: count }, (_, i) => minX + i * spacing);
             }
 
+            // Convert a CSS-style hex (#RRGGBB) to the 0xRRGGBB integer Phaser wants.
+            _hex(str) {
+                if (typeof str !== 'string') return 0xFF0000;
+                return parseInt(str.replace('#', ''), 16) || 0xFF0000;
+            }
+
             renderPlayer(playerId, x, y, playerNumber, color, playerName) {
                 const coords = this.getPixelCoords(x, y);
                 const radius = 8;
-                const isTeam1 = playerId < 100;
-                const teamColor = color || (isTeam1 ? '#FF0000' : '#0000FF');
+                const teamColor = color || (playerId < 100 ? '#FF0000' : '#0000FF');
 
-                const playerG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-                playerG.setAttribute('id', `player-${playerId}`);
-                playerG.setAttribute('data-player-id', playerId);
-
-                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('cx', coords.x);
-                circle.setAttribute('cy', coords.y);
-                circle.setAttribute('r', radius);
-                circle.setAttribute('fill', teamColor);
-                circle.setAttribute('stroke', '#fff');
-                circle.setAttribute('stroke-width', '1');
-                playerG.appendChild(circle);
-
-                const numText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                numText.setAttribute('x', coords.x);
-                numText.setAttribute('y', coords.y);
-                numText.setAttribute('text-anchor', 'middle');
-                numText.setAttribute('dominant-baseline', 'middle');
-                numText.setAttribute('font-size', '7');
-                numText.setAttribute('font-weight', 'bold');
-                numText.setAttribute('fill', '#fff');
-                numText.textContent = playerNumber;
-                playerG.appendChild(numText);
-
-                if (playerName) {
-                    const shortName = playerName.split(' ').pop();
-                    const nameBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                    const nameText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    nameText.setAttribute('x', coords.x);
-                    nameText.setAttribute('y', coords.y + radius + 13);
-                    nameText.setAttribute('text-anchor', 'middle');
-                    nameText.setAttribute('dominant-baseline', 'middle');
-                    nameText.setAttribute('font-size', '11');
-                    nameText.setAttribute('font-weight', 'bold');
-                    nameText.setAttribute('fill', '#fff');
-                    nameText.textContent = shortName;
-                    // background pill behind name
-                    const approxW = shortName.length * 6.5 + 6;
-                    nameBg.setAttribute('x', coords.x - approxW / 2);
-                    nameBg.setAttribute('y', coords.y + radius + 4);
-                    nameBg.setAttribute('width', approxW);
-                    nameBg.setAttribute('height', 18);
-                    nameBg.setAttribute('rx', '4');
-                    nameBg.setAttribute('fill', 'rgba(0,0,0,0.65)');
-                    playerG.appendChild(nameBg);
-                    playerG.appendChild(nameText);
-                }
-
-                // Stamina bar above the player circle (background + filled portion).
-                // The fill width and color are updated live as stamina drains during the match.
-                const STAM_W = 16, STAM_H = 2.5;
-                const stamBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                stamBg.setAttribute('x', coords.x - STAM_W / 2);
-                stamBg.setAttribute('y', coords.y - radius - 6);
-                stamBg.setAttribute('width',  STAM_W);
-                stamBg.setAttribute('height', STAM_H);
-                stamBg.setAttribute('rx', 1);
-                stamBg.setAttribute('fill', 'rgba(0,0,0,0.65)');
-                stamBg.setAttribute('stroke', 'rgba(255,255,255,0.4)');
-                stamBg.setAttribute('stroke-width', '0.3');
-                playerG.appendChild(stamBg);
-
-                const stamFill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                stamFill.setAttribute('x', coords.x - STAM_W / 2);
-                stamFill.setAttribute('y', coords.y - radius - 6);
-                stamFill.setAttribute('width',  STAM_W);
-                stamFill.setAttribute('height', STAM_H);
-                stamFill.setAttribute('rx', 1);
-                stamFill.setAttribute('fill', '#22C55E');
-                playerG.appendChild(stamFill);
-
-                this.svg.appendChild(playerG);
-                this.playerVisuals[playerId] = {
-                    element: playerG, x: coords.x, y: coords.y, pitchX: x, pitchY: y,
-                    staminaFill: stamFill, staminaWidth: STAM_W,
+                // Pre-create the visual record so downstream code that immediately reads
+                // playerVisuals[id].pitchX / pitchY works even before the scene is ready.
+                const visual = {
+                    element: null,        // Phaser Container (filled in once scene exists)
+                    x: coords.x, y: coords.y, pitchX: x, pitchY: y,
+                    staminaFill: null, staminaWidth: 16,
                 };
-                return playerG;
+                this.playerVisuals[playerId] = visual;
+
+                this._enqueue(() => {
+                    const container = this.scene.add.container(coords.x, coords.y);
+
+                    const circle = this.scene.add.circle(0, 0, radius, this._hex(teamColor));
+                    circle.setStrokeStyle(1, 0xffffff, 1);
+                    container.add(circle);
+
+                    const numText = this.scene.add.text(0, 0, String(playerNumber), {
+                        fontFamily: 'Arial', fontStyle: 'bold', fontSize: '9px', color: '#ffffff'
+                    }).setOrigin(0.5);
+                    container.add(numText);
+
+                    // Stamina bar — 16 × 2.5 px, anchored ~6 px above the circle
+                    const stamY = -radius - 6;
+                    const stamBg = this.scene.add.rectangle(0, stamY, 16, 2.5, 0x000000, 0.65)
+                        .setStrokeStyle(0.3, 0xffffff, 0.4);
+                    container.add(stamBg);
+                    const stamFill = this.scene.add.rectangle(-8, stamY, 16, 2.5, 0x22C55E)
+                        .setOrigin(0, 0.5);
+                    container.add(stamFill);
+
+                    if (playerName) {
+                        const shortName = playerName.split(' ').pop();
+                        const approxW = shortName.length * 6.5 + 6;
+                        const nameBg = this.scene.add.rectangle(0, radius + 13, approxW, 18, 0x000000, 0.65)
+                            .setOrigin(0.5);
+                        container.add(nameBg);
+                        const nameText = this.scene.add.text(0, radius + 13, shortName, {
+                            fontFamily: 'Arial', fontStyle: 'bold', fontSize: '12px', color: '#ffffff'
+                        }).setOrigin(0.5);
+                        container.add(nameText);
+                    }
+
+                    visual.element = container;
+                    visual.staminaFill = stamFill;
+                });
+                return null;
             }
 
             // Live-update a player's stamina bar (called from updateStats each tick).
@@ -264,31 +214,48 @@
                 const v = this.playerVisuals[playerId];
                 if (!v || !v.staminaFill) return;
                 const pct = Math.max(0, Math.min(100, stamina));
-                v.staminaFill.setAttribute('width', (v.staminaWidth * pct / 100).toFixed(2));
-                v.staminaFill.setAttribute('fill',
-                    pct < 30 ? '#EF4444' :  // red
-                    pct < 60 ? '#FACC15' :  // yellow
-                               '#22C55E');  // green
+                v.staminaFill.width = (v.staminaWidth * pct) / 100;
+                v.staminaFill.fillColor = pct < 30 ? 0xEF4444 :
+                                          pct < 60 ? 0xFACC15 :
+                                                     0x22C55E;
             }
 
             renderBall(x, y) {
-                if (this.ballElement) this.ballElement.remove();
                 const coords = this.getPixelCoords(x, y);
-                this.ballElement = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                this.ballElement.setAttribute('cx', coords.x);
-                this.ballElement.setAttribute('cy', coords.y);
-                this.ballElement.setAttribute('r', '5');
-                this.ballElement.setAttribute('fill', '#fff');
-                this.ballElement.setAttribute('stroke', '#000');
-                this.ballElement.setAttribute('stroke-width', '0.5');
-                this.svg.appendChild(this.ballElement);
+                this._enqueue(() => {
+                    const ball = this.scene.add.circle(coords.x, coords.y, 5, 0xffffff);
+                    ball.setStrokeStyle(0.5, 0x000000);
+                    this._ball = ball;
+
+                    // Backwards-compat shim. MatchFlow._animBall reads / writes cx/cy via
+                    // getAttribute / setAttribute on this object in a requestAnimationFrame
+                    // loop — proxy directly to the Phaser sprite's x / y so the existing
+                    // animation code keeps working untouched.
+                    this.ballElement = {
+                        _ball: ball,
+                        getAttribute(attr) {
+                            if (attr === 'cx') return this._ball.x;
+                            if (attr === 'cy') return this._ball.y;
+                            return null;
+                        },
+                        setAttribute(attr, val) {
+                            const v = parseFloat(val);
+                            if (attr === 'cx') this._ball.x = v;
+                            else if (attr === 'cy') this._ball.y = v;
+                        },
+                        // Some code in MatchFlow used to call .remove() on SVG; no-op for Phaser
+                        remove() {}
+                    };
+                });
             }
 
             updatePlayerPosition(playerId, x, y) {
                 const visual = this.playerVisuals[playerId];
                 if (!visual) return;
                 const coords = this.getPixelCoords(x, y);
-                visual.element.setAttribute('transform', `translate(${coords.x - visual.x}, ${coords.y - visual.y})`);
+                if (visual.element) visual.element.setPosition(coords.x, coords.y);
+                visual.x = coords.x;
+                visual.y = coords.y;
                 visual.pitchX = x;
                 visual.pitchY = y;
             }
@@ -369,254 +336,236 @@
                 };
             }
 
+            // Composes the standard 100×100 avatar card: rounded background + full human
+            // figure. Thin wrapper over drawBackground + drawFigure so callers that want
+            // just the figure on a transparent ground can use createFigureSVG / drawFigure
+            // directly (e.g. dropping a body onto a pitch scene).
             static createSVG(avatar, size = 100, jerseyOverride = null) {
-                if (!AvatarGenerator._n) AvatarGenerator._n = 0;
-                const uid = 'av' + (++AvatarGenerator._n);
+                const draw = SVG().size(size, size).viewbox(0, 0, 100, 100);
+                this.drawBackground(draw);
+                this.drawFigure(avatar, draw, jerseyOverride);
+                return draw.svg();
+            }
+
+            // Same as createSVG but without the card background — returns the human
+            // figure (head, hair, face, neck, torso, arms) on a transparent canvas.
+            static createFigureSVG(avatar, size = 100, jerseyOverride = null) {
+                const draw = SVG().size(size, size).viewbox(0, 0, 100, 100);
+                this.drawFigure(avatar, draw, jerseyOverride);
+                return draw.svg();
+            }
+
+            // Paints the sky-blue gradient card backdrop (rounded rect, horizon line,
+            // shadow ellipse) into the supplied SVG.js draw root. Independent of any
+            // avatar data — used only by the standard card composition.
+            static drawBackground(draw) {
+                const bgGrad = draw.gradient('linear', add => {
+                    add.stop(0,    '#cce8f8');
+                    add.stop(0.55, '#9ecae8');
+                    add.stop(1,    '#6ea8d0');
+                }).from(0, 0).to(0, 1);
+
+                draw.rect(100, 100).fill(bgGrad).radius(8);
+                draw.line(0, 75, 100, 75).stroke({ color: 'rgba(255,255,255,0.12)', width: 0.5 });
+                draw.ellipse(80, 24).center(50, 100).fill('rgba(0,0,0,0.12)');
+            }
+
+            // Paints the human figure (arms, jersey, neck, ears, head + shading, hair,
+            // eyebrows, eyes, nose, mouth, beard) into the supplied SVG.js draw root,
+            // positioned in the standard 0–100 viewbox: head at (50, 37), shoulders
+            // at y≈63, jersey extends to y=100. Gradients are scoped to `draw`.
+            // No background drawn — caller is responsible for the canvas / backdrop.
+            static drawFigure(avatar, draw, jerseyOverride = null) {
                 const sk  = avatar.skin;
-                const skD = this.shade(sk, -20);   // shadow
-                const skL = this.shade(sk,  18);   // highlight
+                const skD = this.shade(sk, -20);
+                const skL = this.shade(sk,  18);
                 const jer = jerseyOverride || avatar.jersey;
                 const jerD = this.shade(jer, -28);
                 const jerL = this.shade(jer,  22);
 
-                // Build drives shoulder width
                 const bw = avatar.build === 'slim' ? 36 : avatar.build === 'stocky' ? 50 : 43;
                 const bx = 50 - bw / 2;
-
-                // Head geometry  (portrait-style: head fills top 60%)
                 const hcx = 50, hcy = 37, hrx = 17, hry = 21;
-                const topY = hcy - hry;   // = 16
+                const topY = hcy - hry;
 
-                let s = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">`;
+                // ── Figure-scoped gradients (auto-added to <defs> by SVG.js) ──
+                const hdGrad = draw.gradient('linear', add => {
+                    add.stop(0, skL); add.stop(1, skD);
+                }).from(0.25, 0).to(1, 1);
 
-                // ── Defs ──────────────────────────────────────────────────
-                s += `<defs>
-  <linearGradient id="bg${uid}" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%"   stop-color="#cce8f8"/>
-    <stop offset="55%"  stop-color="#9ecae8"/>
-    <stop offset="100%" stop-color="#6ea8d0"/>
-  </linearGradient>
-  <linearGradient id="hd${uid}" x1="0.25" y1="0" x2="1" y2="1">
-    <stop offset="0%"   stop-color="${skL}"/>
-    <stop offset="100%" stop-color="${skD}"/>
-  </linearGradient>
-  <linearGradient id="jr${uid}" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0%"   stop-color="${jerD}"/>
-    <stop offset="25%"  stop-color="${jer}"/>
-    <stop offset="75%"  stop-color="${jer}"/>
-    <stop offset="100%" stop-color="${jerD}"/>
-  </linearGradient>
-  <linearGradient id="jrv${uid}" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%"   stop-color="${jerL}" stop-opacity="0.4"/>
-    <stop offset="100%" stop-color="${jerD}" stop-opacity="0.3"/>
-  </linearGradient>
-</defs>`;
+                const jrGrad = draw.gradient('linear', add => {
+                    add.stop(0,    jerD);
+                    add.stop(0.25, jer);
+                    add.stop(0.75, jer);
+                    add.stop(1,    jerD);
+                }).from(0, 0).to(1, 0);
 
-                // ── Background ────────────────────────────────────────────
-                s += `<rect width="100" height="100" fill="url(#bg${uid})" rx="8"/>`;
-                // subtle pitch lines
-                s += `<line x1="0" y1="75" x2="100" y2="75" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/>`;
-                s += `<ellipse cx="50" cy="100" rx="40" ry="12" fill="rgba(0,0,0,0.12)"/>`;
+                const jrvGrad = draw.gradient('linear', add => {
+                    add.stop(0, jerL, 0.4);
+                    add.stop(1, jerD, 0.3);
+                }).from(0, 0).to(0, 1);
 
-                // ── Arms (behind body) ────────────────────────────────────
-                s += `<path d="M${bx+4},65 L${bx-13},72 L${bx-14},94 L${bx+4},90 Z" fill="url(#jr${uid})"/>`;
-                s += `<path d="M${bx+bw-4},65 L${bx+bw+13},72 L${bx+bw+14},94 L${bx+bw-4},90 Z" fill="url(#jr${uid})"/>`;
-                // wrist/hand
-                s += `<ellipse cx="${bx-11}" cy="95" rx="4.5" ry="3" fill="${sk}" opacity="0.9"/>`;
-                s += `<ellipse cx="${bx+bw+11}" cy="95" rx="4.5" ry="3" fill="${sk}" opacity="0.9"/>`;
+                // ── Arms ───────────────────────────────────────────────────
+                draw.path(`M${bx+4},65 L${bx-13},72 L${bx-14},94 L${bx+4},90 Z`).fill(jrGrad);
+                draw.path(`M${bx+bw-4},65 L${bx+bw+13},72 L${bx+bw+14},94 L${bx+bw-4},90 Z`).fill(jrGrad);
+                draw.ellipse(9, 6).center(bx-11, 95).fill(sk).opacity(0.9);
+                draw.ellipse(9, 6).center(bx+bw+11, 95).fill(sk).opacity(0.9);
 
-                // ── Jersey body ───────────────────────────────────────────
-                s += `<path d="M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z" fill="url(#jr${uid})"/>`;
-                s += `<path d="M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z" fill="url(#jrv${uid})"/>`;
-                // side shadow strips
-                s += `<path d="M${bx},63 L${bx+7},63 L${bx+3},100 L${bx-5},100 Z" fill="rgba(0,0,0,0.08)"/>`;
-                s += `<path d="M${bx+bw},63 L${bx+bw-7},63 L${bx+bw-3},100 L${bx+bw+5},100 Z" fill="rgba(0,0,0,0.08)"/>`;
+                // ── Jersey body ────────────────────────────────────────────
+                draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrGrad);
+                draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrvGrad);
+                draw.path(`M${bx},63 L${bx+7},63 L${bx+3},100 L${bx-5},100 Z`).fill('rgba(0,0,0,0.08)');
+                draw.path(`M${bx+bw},63 L${bx+bw-7},63 L${bx+bw-3},100 L${bx+bw+5},100 Z`).fill('rgba(0,0,0,0.08)');
 
-                // V-collar
-                s += `<polygon points="${50-8},63 50,73 ${50+8},63" fill="${jerD}"/>`;
-                s += `<polygon points="${50-6},63 50,71 ${50+6},63" fill="${sk}" opacity="0.15"/>`;
+                draw.polygon(`${50-8},63 50,73 ${50+8},63`).fill(jerD);
+                draw.polygon(`${50-6},63 50,71 ${50+6},63`).fill(sk).opacity(0.15);
 
-                // shoulder seam highlights
-                s += `<path d="M${bx},63 Q${bx+5},61 ${bx+14},63" stroke="${jerL}" fill="none" stroke-width="1.2" opacity="0.55"/>`;
-                s += `<path d="M${bx+bw},63 Q${bx+bw-5},61 ${bx+bw-14},63" stroke="${jerL}" fill="none" stroke-width="1.2" opacity="0.55"/>`;
+                draw.path(`M${bx},63 Q${bx+5},61 ${bx+14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
+                draw.path(`M${bx+bw},63 Q${bx+bw-5},61 ${bx+bw-14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
 
-                // ── Neck ──────────────────────────────────────────────────
-                s += `<path d="M45,55 Q50,53 55,55 L55.5,63 Q50,61 44.5,63 Z" fill="${sk}"/>`;
-                s += `<path d="M45,55 Q47,53 50,54 L50,63 Q47,62 44.5,63 Z" fill="rgba(0,0,0,0.07)"/>`;
+                // ── Neck ───────────────────────────────────────────────────
+                draw.path(`M45,55 Q50,53 55,55 L55.5,63 Q50,61 44.5,63 Z`).fill(sk);
+                draw.path(`M45,55 Q47,53 50,54 L50,63 Q47,62 44.5,63 Z`).fill('rgba(0,0,0,0.07)');
 
-                // ── Ears (drawn before head so head overlaps inner ear) ───
-                s += `<ellipse cx="${hcx-hrx+1}" cy="${hcy+4}" rx="4" ry="5" fill="${sk}"/>`;
-                s += `<ellipse cx="${hcx+hrx-1}" cy="${hcy+4}" rx="4" ry="5" fill="${sk}"/>`;
-                s += `<ellipse cx="${hcx-hrx+1}" cy="${hcy+4}" rx="2.2" ry="3" fill="${skD}" opacity="0.35"/>`;
-                s += `<ellipse cx="${hcx+hrx-1}" cy="${hcy+4}" rx="2.2" ry="3" fill="${skD}" opacity="0.35"/>`;
+                // ── Ears ───────────────────────────────────────────────────
+                draw.ellipse(8, 10).center(hcx-hrx+1, hcy+4).fill(sk);
+                draw.ellipse(8, 10).center(hcx+hrx-1, hcy+4).fill(sk);
+                draw.ellipse(4.4, 6).center(hcx-hrx+1, hcy+4).fill(skD).opacity(0.35);
+                draw.ellipse(4.4, 6).center(hcx+hrx-1, hcy+4).fill(skD).opacity(0.35);
 
-                // ── Head ──────────────────────────────────────────────────
-                s += `<ellipse cx="${hcx}" cy="${hcy}" rx="${hrx}" ry="${hry}" fill="url(#hd${uid})"/>`;
-                // subtle jaw shadow
-                s += `<ellipse cx="${hcx}" cy="${hcy+13}" rx="12" ry="6" fill="${skD}" opacity="0.18"/>`;
-                // forehead highlight
-                s += `<ellipse cx="${hcx-4}" cy="${topY+6}" rx="7" ry="4.5" fill="${skL}" opacity="0.3"/>`;
-                // cheek blush
-                s += `<ellipse cx="${hcx-10}" cy="${hcy+7}" rx="5" ry="3.5" fill="rgba(230,100,80,0.15)"/>`;
-                s += `<ellipse cx="${hcx+10}" cy="${hcy+7}" rx="5" ry="3.5" fill="rgba(230,100,80,0.15)"/>`;
+                // ── Head + shading ─────────────────────────────────────────
+                draw.ellipse(hrx*2, hry*2).center(hcx, hcy).fill(hdGrad);
+                draw.ellipse(24, 12).center(hcx, hcy+13).fill(skD).opacity(0.18);
+                draw.ellipse(14, 9).center(hcx-4, topY+6).fill(skL).opacity(0.3);
+                draw.ellipse(10, 7).center(hcx-10, hcy+7).fill('rgba(230,100,80,0.15)');
+                draw.ellipse(10, 7).center(hcx+10, hcy+7).fill('rgba(230,100,80,0.15)');
 
-                // ── Hair ──────────────────────────────────────────────────
-                s += this.drawHair(avatar, hcx, hcy, hrx, hry);
+                // ── Hair (delegates to drawHair, passing the draw root) ────
+                this.drawHair(avatar, hcx, hcy, hrx, hry, draw);
 
-                // ── Eyebrows ──────────────────────────────────────────────
+                // ── Eyebrows ───────────────────────────────────────────────
                 const browC = (avatar.hair === '#DAA520' || avatar.hair === '#C19A6B') ? '#7a5800' : this.shade(avatar.hair, -10);
                 const browY = hcy - 9;
+                const brow = (d) => draw.path(d).fill('none').stroke({ color: browC, width: 1.5, linecap: 'round' });
                 if (avatar.expr === 2) {
-                    s += `<path d="M41,${browY+1} Q44.5,${browY-2} 48,${browY+0.5}" stroke="${browC}" fill="none" stroke-width="1.5" stroke-linecap="round"/>`;
-                    s += `<path d="M52,${browY+0.5} Q55.5,${browY-2} 59,${browY+1}" stroke="${browC}" fill="none" stroke-width="1.5" stroke-linecap="round"/>`;
+                    brow(`M41,${browY+1} Q44.5,${browY-2} 48,${browY+0.5}`);
+                    brow(`M52,${browY+0.5} Q55.5,${browY-2} 59,${browY+1}`);
                 } else {
-                    s += `<path d="M41,${browY} Q44.5,${browY-2.5} 48,${browY}" stroke="${browC}" fill="none" stroke-width="1.5" stroke-linecap="round"/>`;
-                    s += `<path d="M52,${browY} Q55.5,${browY-2.5} 59,${browY}" stroke="${browC}" fill="none" stroke-width="1.5" stroke-linecap="round"/>`;
+                    brow(`M41,${browY} Q44.5,${browY-2.5} 48,${browY}`);
+                    brow(`M52,${browY} Q55.5,${browY-2.5} 59,${browY}`);
                 }
 
-                // ── Eyes ──────────────────────────────────────────────────
+                // ── Eyes ───────────────────────────────────────────────────
                 const ey = hcy - 3;
-                // left eye
-                s += `<ellipse cx="43" cy="${ey}" rx="4.2" ry="3.4" fill="white"/>`;
-                s += `<circle  cx="43" cy="${ey}" r="2.7" fill="${avatar.eyes}"/>`;
-                s += `<circle  cx="43" cy="${ey}" r="1.6" fill="#0d0d0d"/>`;
-                s += `<circle  cx="44.4" cy="${ey-1.1}" r="0.9" fill="white"/>`;
-                s += `<path d="M38.8,${ey-2.8} Q43,${ey-5} 47.2,${ey-2.8}" stroke="${skD}" fill="none" stroke-width="0.8" opacity="0.6"/>`;
-                // right eye
-                s += `<ellipse cx="57" cy="${ey}" rx="4.2" ry="3.4" fill="white"/>`;
-                s += `<circle  cx="57" cy="${ey}" r="2.7" fill="${avatar.eyes}"/>`;
-                s += `<circle  cx="57" cy="${ey}" r="1.6" fill="#0d0d0d"/>`;
-                s += `<circle  cx="58.4" cy="${ey-1.1}" r="0.9" fill="white"/>`;
-                s += `<path d="M52.8,${ey-2.8} Q57,${ey-5} 61.2,${ey-2.8}" stroke="${skD}" fill="none" stroke-width="0.8" opacity="0.6"/>`;
+                const drawEye = (cx) => {
+                    draw.ellipse(8.4, 6.8).center(cx, ey).fill('white');
+                    draw.circle(5.4).center(cx, ey).fill(avatar.eyes);
+                    draw.circle(3.2).center(cx, ey).fill('#0d0d0d');
+                    draw.circle(1.8).center(cx+1.4, ey-1.1).fill('white');
+                    draw.path(`M${cx-4.2},${ey-2.8} Q${cx},${ey-5} ${cx+4.2},${ey-2.8}`).fill('none').stroke({ color: skD, width: 0.8, opacity: 0.6 });
+                };
+                drawEye(43);
+                drawEye(57);
 
-                // ── Nose ──────────────────────────────────────────────────
+                // ── Nose ───────────────────────────────────────────────────
                 const ny = hcy + 7;
-                s += `<path d="M50,${ny-5} C50,${ny-2} 47.5,${ny+1} 47,${ny+2} M50,${ny-5} C50,${ny-2} 52.5,${ny+1} 53,${ny+2}" stroke="${skD}" fill="none" stroke-width="0.85" opacity="0.5" stroke-linecap="round"/>`;
-                s += `<path d="M47,${ny+2} Q50,${ny+3.5} 53,${ny+2}" stroke="${skD}" fill="none" stroke-width="0.75" opacity="0.45"/>`;
+                draw.path(`M50,${ny-5} C50,${ny-2} 47.5,${ny+1} 47,${ny+2} M50,${ny-5} C50,${ny-2} 52.5,${ny+1} 53,${ny+2}`).fill('none').stroke({ color: skD, width: 0.85, opacity: 0.5, linecap: 'round' });
+                draw.path(`M47,${ny+2} Q50,${ny+3.5} 53,${ny+2}`).fill('none').stroke({ color: skD, width: 0.75, opacity: 0.45 });
 
-                // ── Mouth ─────────────────────────────────────────────────
+                // ── Mouth ──────────────────────────────────────────────────
                 const my = hcy + 14;
                 const lipC = this.shade(sk, -38);
                 if (avatar.expr === 0) {
-                    // wide smile
-                    s += `<path d="M44,${my} Q50,${my+6} 56,${my}" stroke="${lipC}" fill="none" stroke-width="1.2" stroke-linecap="round"/>`;
-                    s += `<path d="M44.5,${my+0.5} Q50,${my+5.5} 55.5,${my+0.5}" fill="rgba(160,40,40,0.3)"/>`;
-                    s += `<path d="M45.5,${my+1} Q50,${my+3.5} 54.5,${my+1}" fill="rgba(255,255,255,0.35)"/>`;
+                    draw.path(`M44,${my} Q50,${my+6} 56,${my}`).fill('none').stroke({ color: lipC, width: 1.2, linecap: 'round' });
+                    draw.path(`M44.5,${my+0.5} Q50,${my+5.5} 55.5,${my+0.5}`).fill('rgba(160,40,40,0.3)');
+                    draw.path(`M45.5,${my+1} Q50,${my+3.5} 54.5,${my+1}`).fill('rgba(255,255,255,0.35)');
                 } else if (avatar.expr === 1) {
-                    // relaxed/neutral
-                    s += `<path d="M44,${my+2} Q50,${my+4} 56,${my+2}" stroke="${lipC}" fill="none" stroke-width="1.1" stroke-linecap="round"/>`;
-                    s += `<path d="M44.5,${my+2} Q50,${my+3.5} 55.5,${my+2}" fill="rgba(160,40,40,0.2)"/>`;
+                    draw.path(`M44,${my+2} Q50,${my+4} 56,${my+2}`).fill('none').stroke({ color: lipC, width: 1.1, linecap: 'round' });
+                    draw.path(`M44.5,${my+2} Q50,${my+3.5} 55.5,${my+2}`).fill('rgba(160,40,40,0.2)');
                 } else {
-                    // stern/focused
-                    s += `<path d="M44,${my+3.5} Q50,${my+2} 56,${my+3.5}" stroke="${lipC}" fill="none" stroke-width="1.1" stroke-linecap="round"/>`;
+                    draw.path(`M44,${my+3.5} Q50,${my+2} 56,${my+3.5}`).fill('none').stroke({ color: lipC, width: 1.1, linecap: 'round' });
                 }
 
-                // ── Beard / stubble ───────────────────────────────────────
+                // ── Beard / stubble ────────────────────────────────────────
                 if (avatar.hasBeard) {
                     const bc = avatar.beardColor;
-                    s += `<path d="M35,${hcy+11} Q50,${hcy+25} 65,${hcy+11} Q63,${hcy+20} 50,${hcy+24} Q37,${hcy+20} 35,${hcy+11} Z" fill="${bc}" opacity="0.20"/>`;
-                    s += `<path d="M37,${hcy+9} Q50,${hcy+22} 63,${hcy+9} Q61,${hcy+17} 50,${hcy+21} Q39,${hcy+17} 37,${hcy+9} Z" fill="${bc}" opacity="0.12"/>`;
-                    // mustache
-                    s += `<path d="M45.5,${my-1} Q50,${my+1} 54.5,${my-1}" stroke="${bc}" fill="none" stroke-width="1.1" opacity="0.35"/>`;
+                    draw.path(`M35,${hcy+11} Q50,${hcy+25} 65,${hcy+11} Q63,${hcy+20} 50,${hcy+24} Q37,${hcy+20} 35,${hcy+11} Z`).fill(bc).opacity(0.20);
+                    draw.path(`M37,${hcy+9} Q50,${hcy+22} 63,${hcy+9} Q61,${hcy+17} 50,${hcy+21} Q39,${hcy+17} 37,${hcy+9} Z`).fill(bc).opacity(0.12);
+                    draw.path(`M45.5,${my-1} Q50,${my+1} 54.5,${my-1}`).fill('none').stroke({ color: bc, width: 1.1, opacity: 0.35 });
                 }
-
-                s += `</svg>`;
-                return s;
             }
 
-            static drawHair(avatar, cx, cy, rx, ry) {
+            // Adds hair shapes to the supplied SVG.js draw root. Same geometry as before.
+            // (Returns void — the old string-returning shape isn't needed any more.)
+            static drawHair(avatar, cx, cy, rx, ry, draw) {
                 const hair = avatar.hair;
                 const hL   = this.shade(hair, 20);
-                const topY = cy - ry;    // top of head ellipse
-                let h = '';
+                const topY = cy - ry;
 
                 switch (avatar.hairStyle) {
                     case 'short': {
-                        // tight cap following head curve
-                        h += `<path d="M${cx-rx},${cy-5} Q${cx-rx+2},${topY-3} ${cx},${topY-4} Q${cx+rx-2},${topY-3} ${cx+rx},${cy-5} Q${cx+rx},${cy-14} ${cx},${topY-5} Q${cx-rx},${cy-14} ${cx-rx},${cy-5} Z" fill="${hair}"/>`;
-                        h += `<ellipse cx="${cx-2}" cy="${topY+3}" rx="6" ry="3.5" fill="${hL}" opacity="0.3"/>`;
+                        draw.path(`M${cx-rx},${cy-5} Q${cx-rx+2},${topY-3} ${cx},${topY-4} Q${cx+rx-2},${topY-3} ${cx+rx},${cy-5} Q${cx+rx},${cy-14} ${cx},${topY-5} Q${cx-rx},${cy-14} ${cx-rx},${cy-5} Z`).fill(hair);
+                        draw.ellipse(12, 7).center(cx-2, topY+3).fill(hL).opacity(0.3);
                         break;
                     }
                     case 'curly': {
-                        // thick curly mass
-                        h += `<ellipse cx="${cx}" cy="${topY+7}" rx="${rx+4}" ry="14" fill="${hair}"/>`;
-                        const pts = [[0,-1],[1,0],[2,1],[3,0],[4,-1],[5,0],[6,1],[7,0],[8,-1],[9,0],[10,1],[11,0]];
+                        draw.ellipse((rx+4)*2, 28).center(cx, topY+7).fill(hair);
                         for (let i = 0; i < 13; i++) {
                             const a = (i/13)*Math.PI*2;
                             const r2 = rx + 3 + Math.sin(i*2.3)*1.5;
-                            const px = cx + Math.cos(a)*r2, py = cy-10 + Math.sin(a)*10;
-                            h += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.8" fill="${hair}"/>`;
+                            const px = +(cx + Math.cos(a)*r2).toFixed(1);
+                            const py = +(cy-10 + Math.sin(a)*10).toFixed(1);
+                            draw.circle(7.6).center(px, py).fill(hair);
                         }
-                        h += `<ellipse cx="${cx-3}" cy="${topY}" rx="5" ry="3" fill="${hL}" opacity="0.22"/>`;
+                        draw.ellipse(10, 6).center(cx-3, topY).fill(hL).opacity(0.22);
                         break;
                     }
                     case 'spiky': {
-                        // base + sharp distinct spikes
-                        h += `<ellipse cx="${cx}" cy="${topY+7}" rx="${rx}" ry="9" fill="${hair}"/>`;
+                        draw.ellipse(rx*2, 18).center(cx, topY+7).fill(hair);
                         const spikes = [[-9,13],[-5,18],[-1,21],[3,19],[7,15],[11,10]];
-                        spikes.forEach(([ox,ht]) => {
+                        spikes.forEach(([ox, ht]) => {
                             const base = topY + 6;
-                            h += `<polygon points="${cx+ox-3},${base} ${cx+ox+1},${base-ht} ${cx+ox+4},${base}" fill="${hair}"/>`;
+                            draw.polygon(`${cx+ox-3},${base} ${cx+ox+1},${base-ht} ${cx+ox+4},${base}`).fill(hair);
                         });
-                        h += `<ellipse cx="${cx+1}" cy="${topY+2}" rx="4" ry="2.5" fill="${hL}" opacity="0.28"/>`;
+                        draw.ellipse(8, 5).center(cx+1, topY+2).fill(hL).opacity(0.28);
                         break;
                     }
                     case 'slicked': {
-                        // side-parted, swept right
-                        h += `<path d="M${cx-rx},${cy-6}
-                            Q${cx-rx+2},${topY-2} ${cx-4},${topY-3}
-                            Q${cx+rx-4},${topY-2} ${cx+rx},${cy-4}
-                            L${cx+rx-1},${cy-1}
-                            Q${cx+rx-4},${topY+3} ${cx-1},${topY+1}
-                            Q${cx-rx+3},${topY+3} ${cx-rx},${cy-4} Z" fill="${hair}"/>`;
-                        // part line + sheen
-                        h += `<path d="M${cx-3},${cy-7} Q${cx-1},${topY-1} ${cx+6},${topY+1}" stroke="${hL}" fill="none" stroke-width="1.4" opacity="0.35" stroke-linecap="round"/>`;
+                        draw.path(`M${cx-rx},${cy-6} Q${cx-rx+2},${topY-2} ${cx-4},${topY-3} Q${cx+rx-4},${topY-2} ${cx+rx},${cy-4} L${cx+rx-1},${cy-1} Q${cx+rx-4},${topY+3} ${cx-1},${topY+1} Q${cx-rx+3},${topY+3} ${cx-rx},${cy-4} Z`).fill(hair);
+                        draw.path(`M${cx-3},${cy-7} Q${cx-1},${topY-1} ${cx+6},${topY+1}`).fill('none').stroke({ color: hL, width: 1.4, opacity: 0.35, linecap: 'round' });
                         break;
                     }
                     case 'wavy': {
-                        h += `<path d="M${cx-rx},${cy-5}
-                            Q${cx-rx+1},${topY-1} ${cx-8},${topY-5}
-                            Q${cx},${topY-8} ${cx+8},${topY-5}
-                            Q${cx+rx-1},${topY-1} ${cx+rx},${cy-5}
-                            L${cx+rx},${cy-2}
-                            Q${cx+rx-2},${topY+2} ${cx+6},${topY-2}
-                            Q${cx},${topY-5} ${cx-6},${topY-2}
-                            Q${cx-rx+2},${topY+2} ${cx-rx},${cy-2} Z" fill="${hair}"/>`;
-                        h += `<path d="M${cx-10},${cy-8} Q${cx-5},${topY-3} ${cx+2},${topY-5}" stroke="${hL}" fill="none" stroke-width="1.5" opacity="0.3" stroke-linecap="round"/>`;
+                        draw.path(`M${cx-rx},${cy-5} Q${cx-rx+1},${topY-1} ${cx-8},${topY-5} Q${cx},${topY-8} ${cx+8},${topY-5} Q${cx+rx-1},${topY-1} ${cx+rx},${cy-5} L${cx+rx},${cy-2} Q${cx+rx-2},${topY+2} ${cx+6},${topY-2} Q${cx},${topY-5} ${cx-6},${topY-2} Q${cx-rx+2},${topY+2} ${cx-rx},${cy-2} Z`).fill(hair);
+                        draw.path(`M${cx-10},${cy-8} Q${cx-5},${topY-3} ${cx+2},${topY-5}`).fill('none').stroke({ color: hL, width: 1.5, opacity: 0.3, linecap: 'round' });
                         break;
                     }
                     case 'mohawk': {
-                        // shaved sides — just central strip
-                        h += `<path d="M${cx-4},${cy-12}
-                            Q${cx-3},${topY-8} ${cx},${topY-12}
-                            Q${cx+3},${topY-8} ${cx+4},${cy-12}
-                            L${cx+3},${cy-4} Q${cx},${cy-2} ${cx-3},${cy-4} Z" fill="${hair}"/>`;
-                        // texture lines
-                        for (let i=0;i<5;i++) {
+                        draw.path(`M${cx-4},${cy-12} Q${cx-3},${topY-8} ${cx},${topY-12} Q${cx+3},${topY-8} ${cx+4},${cy-12} L${cx+3},${cy-4} Q${cx},${cy-2} ${cx-3},${cy-4} Z`).fill(hair);
+                        for (let i = 0; i < 5; i++) {
                             const py = cy-12+i*2.5;
-                            h += `<line x1="${cx-2.5}" y1="${py}" x2="${cx+2.5}" y2="${py-3}" stroke="${hL}" stroke-width="0.7" opacity="0.4"/>`;
+                            draw.line(cx-2.5, py, cx+2.5, py-3).stroke({ color: hL, width: 0.7, opacity: 0.4 });
                         }
                         break;
                     }
                     case 'afro': {
-                        h += `<ellipse cx="${cx}" cy="${topY+5}" rx="${rx+6}" ry="20" fill="${hair}"/>`;
-                        for (let i=0;i<16;i++) {
-                            const a=(i/16)*Math.PI*2;
+                        draw.ellipse((rx+6)*2, 40).center(cx, topY+5).fill(hair);
+                        for (let i = 0; i < 16; i++) {
+                            const a = (i/16)*Math.PI*2;
                             const r2 = rx+5+Math.sin(i*1.9)*2.5;
-                            const px=cx+Math.cos(a)*r2, py=topY+5+Math.sin(a)*17;
-                            h += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4.2" fill="${hair}"/>`;
+                            const px = +(cx + Math.cos(a)*r2).toFixed(1);
+                            const py = +(topY+5 + Math.sin(a)*17).toFixed(1);
+                            draw.circle(8.4).center(px, py).fill(hair);
                         }
-                        h += `<ellipse cx="${cx-5}" cy="${topY-4}" rx="6" ry="4" fill="${hL}" opacity="0.2"/>`;
+                        draw.ellipse(12, 8).center(cx-5, topY-4).fill(hL).opacity(0.2);
                         break;
                     }
                     case 'bald':
                     default: {
-                        // very faint stubble hint
-                        h += `<ellipse cx="${cx}" cy="${topY+7}" rx="${rx}" ry="9" fill="${hair}" opacity="0.09"/>`;
+                        draw.ellipse(rx*2, 18).center(cx, topY+7).fill(hair).opacity(0.09);
                         break;
                     }
                 }
-                return h;
             }
         }
 
@@ -627,6 +576,109 @@
             static _lum(hex) {
                 const n = parseInt(hex.replace('#',''), 16);
                 return ((n>>16)&255)*0.299 + ((n>>8)&255)*0.587 + (n&255)*0.114;
+            }
+
+            // Pick a heraldic emblem for this crest. Tries to match the team name's noun
+            // (Lions → lion, Eagles → eagle, etc.); falls back to a seeded random from the
+            // full catalog for nouns without a creature match (City / Albion / Dynamo / …).
+            static _pickEmblem(seed, name) {
+                const lower = (name || '').toLowerCase();
+                if (lower.includes('lion'))    return 'lion';
+                if (lower.includes('tiger'))   return 'lion';      // big-cat silhouette covers both
+                if (lower.includes('eagle'))   return 'eagle';
+                if (lower.includes('falcon'))  return 'eagle';
+                if (lower.includes('wolf') || lower.includes('wolves')) return 'wolf';
+                if (lower.includes('dragon'))  return 'dragon';
+                if (lower.includes('knight') || lower.includes('royal')) return 'crown';
+                if (lower.includes('fire') || lower.includes('thunder') || lower.includes('storm')) return 'phoenix';
+                if (lower.includes('rose'))    return 'rose';
+                const all = ['lion','eagle','wolf','dragon','phoenix','rose','fleur','crown','star'];
+                const rng = this._rng(seed + 700);
+                return all[Math.floor(rng() * all.length)];
+            }
+
+            // Returns SVG markup for the chosen emblem, sized + positioned to sit in the
+            // upper portion of the shield (centered roughly at (50, 32), fits in ~24×24).
+            // Gold (acc) is the main fill; primaryColor is reused for inner cutouts so
+            // features (eyes / beak / face) show against the surrounding gold and pick up
+            // contrast with the shield's main hue.
+            static _emblemSVG(kind, primaryColor, acc) {
+                const E = {
+                    lion: `<g fill="${acc}">
+                        <polygon points="50,18 52,22 56,21 56,25 60,26 58,29 62,31 58,33 60,36 56,37 56,41 52,40 50,44 48,40 44,41 44,37 40,36 42,33 38,31 42,29 40,26 44,25 44,21 48,22"/>
+                        <ellipse cx="50" cy="31" rx="5" ry="6" fill="${primaryColor}"/>
+                        <circle cx="44.5" cy="26" r="1.4"/>
+                        <circle cx="55.5" cy="26" r="1.4"/>
+                        <circle cx="47.5" cy="30" r="0.7"/>
+                        <circle cx="52.5" cy="30" r="0.7"/>
+                        <polygon points="49,33 51,33 50,34.5"/>
+                        <path d="M48,35 Q50,37 52,35" fill="none" stroke="${acc}" stroke-width="0.6"/>
+                    </g>`,
+                    eagle: `<g fill="${acc}">
+                        <ellipse cx="50" cy="34" rx="2.5" ry="6"/>
+                        <path d="M48,32 Q40,25 36,33 Q44,30 48,35 Z"/>
+                        <path d="M52,32 Q60,25 64,33 Q56,30 52,35 Z"/>
+                        <circle cx="50" cy="25" r="2.5"/>
+                        <polygon points="49,27 51,27 50,28.5" fill="${primaryColor}"/>
+                        <polygon points="48,40 52,40 50,44"/>
+                        <circle cx="50.6" cy="24.5" r="0.4" fill="${primaryColor}"/>
+                    </g>`,
+                    wolf: `<g fill="${acc}">
+                        <polygon points="42,22 46,29 49,28 51,28 54,29 58,22 57,30 60,33 58,38 54,40 46,40 42,38 40,33 43,30"/>
+                        <circle cx="47.5" cy="32" r="0.7" fill="${primaryColor}"/>
+                        <circle cx="52.5" cy="32" r="0.7" fill="${primaryColor}"/>
+                        <polygon points="49,35 51,35 50,37" fill="${primaryColor}"/>
+                    </g>`,
+                    dragon: `<g fill="${acc}">
+                        <polygon points="42,20 46,26 47,22"/>
+                        <polygon points="58,20 54,26 53,22"/>
+                        <path d="M43,26 L47,25 L53,25 L57,26 L60,30 L60,34 L57,38 L43,38 L40,34 L40,30 Z"/>
+                        <polygon points="46,38 54,38 56,42 44,42"/>
+                        <circle cx="47" cy="30" r="1.1" fill="${primaryColor}"/>
+                        <circle cx="53" cy="30" r="1.1" fill="${primaryColor}"/>
+                        <circle cx="47" cy="30" r="0.4"/>
+                        <circle cx="53" cy="30" r="0.4"/>
+                        <polygon points="48,42 47.5,44 47,42" fill="${primaryColor}"/>
+                        <polygon points="52,42 52.5,44 53,42" fill="${primaryColor}"/>
+                    </g>`,
+                    phoenix: `<g fill="${acc}">
+                        <ellipse cx="50" cy="30" rx="2" ry="5"/>
+                        <circle cx="50" cy="23" r="2"/>
+                        <polygon points="49,25 51,25 50,27" fill="${primaryColor}"/>
+                        <path d="M48,27 Q42,18 40,26 Q45,25 48,32 Z"/>
+                        <path d="M52,27 Q58,18 60,26 Q55,25 52,32 Z"/>
+                        <polygon points="46,35 47.5,42 49,36 50,42 51,36 52.5,42 54,35"/>
+                    </g>`,
+                    rose: `<g fill="${acc}">
+                        <ellipse cx="50" cy="24" rx="3" ry="5"/>
+                        <ellipse cx="50" cy="40" rx="3" ry="5"/>
+                        <ellipse cx="45" cy="27.5" rx="5" ry="3" transform="rotate(-60 45 27.5)"/>
+                        <ellipse cx="55" cy="27.5" rx="5" ry="3" transform="rotate(60 55 27.5)"/>
+                        <ellipse cx="45" cy="36.5" rx="5" ry="3" transform="rotate(60 45 36.5)"/>
+                        <ellipse cx="55" cy="36.5" rx="5" ry="3" transform="rotate(-60 55 36.5)"/>
+                        <circle cx="50" cy="32" r="3" fill="${primaryColor}"/>
+                        <circle cx="50" cy="32" r="1.4"/>
+                    </g>`,
+                    fleur: `<g fill="${acc}">
+                        <path d="M50,20 Q47,28 49,32 L51,32 Q53,28 50,20 Z"/>
+                        <path d="M49,32 Q41,28 41,38 Q47,35 50,32 Z"/>
+                        <path d="M51,32 Q59,28 59,38 Q53,35 50,32 Z"/>
+                        <rect x="42" y="33.5" width="16" height="2.5"/>
+                        <polygon points="47,36 53,36 50,42"/>
+                    </g>`,
+                    crown: `<g fill="${acc}">
+                        <polygon points="40,34 40,28 44,30 47,25 50,29 53,25 56,30 60,28 60,34"/>
+                        <rect x="40" y="34" width="20" height="5"/>
+                        <circle cx="47" cy="25.5" r="0.8" fill="${primaryColor}"/>
+                        <circle cx="50" cy="28" r="0.8" fill="${primaryColor}"/>
+                        <circle cx="53" cy="25.5" r="0.8" fill="${primaryColor}"/>
+                        <circle cx="45" cy="36.5" r="0.6" fill="${primaryColor}"/>
+                        <circle cx="50" cy="36.5" r="0.6" fill="${primaryColor}"/>
+                        <circle cx="55" cy="36.5" r="0.6" fill="${primaryColor}"/>
+                    </g>`,
+                    star: `<polygon points="50,21 52.4,28.5 60.5,28.5 53.9,33.2 56.4,40.7 50,36 43.6,40.7 46.1,33.2 39.5,28.5 47.6,28.5" fill="${acc}"/>`,
+                };
+                return E[kind] || E.star;
             }
 
             static generateName(seed) {
@@ -652,9 +704,14 @@
                 const uid = `cr${seed}_${Math.random().toString(36).slice(2,7)}`;
                 const shield = 'M50,5 L95,20 L95,75 Q95,108 50,118 Q5,108 5,75 L5,20 Z';
                 const inner  = 'M50,12 L88,25 L88,73 Q88,102 50,111 Q12,102 12,73 L12,25 Z';
+                // Everything painted inside the shield (design pattern, inner accent,
+                // star, initials) goes through this clip so nothing can poke past the
+                // shield outline — wide letters in the initials and the gold inner-accent
+                // stroke used to bleed at the curved bottom.
                 let s = `<svg width="${size}" height="${h}" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">`;
                 s += `<defs><clipPath id="${uid}"><path d="${shield}"/></clipPath></defs>`;
-                s += `<path d="${shield}" fill="rgba(0,0,0,0.22)" transform="translate(2,3)"/>`;
+                // Shadow — offset by (2,2) so it stays within the viewBox bottom (y≤120).
+                s += `<path d="${shield}" fill="rgba(0,0,0,0.22)" transform="translate(2,2)"/>`;
                 s += `<path d="${shield}" fill="${primaryColor}"/>`;
                 s += `<g clip-path="url(#${uid})">`;
                 if (design==='halves')   s += `<rect x="50" y="0" width="50" height="120" fill="${sec}" opacity="0.85"/>`;
@@ -663,12 +720,15 @@
                 else if (design==='chevron')   s += `<polygon points="0,52 50,88 100,52 100,72 50,108 0,72" fill="${sec}" opacity="0.85"/>`;
                 else if (design==='diagonal')  s += `<polygon points="0,0 65,0 100,50 100,120 35,120 0,70" fill="${sec}" opacity="0.72"/>`;
                 else if (design==='cross')    { s += `<rect x="40" y="0" width="20" height="120" fill="${sec}" opacity="0.8"/>`; s += `<rect x="0" y="44" width="100" height="22" fill="${sec}" opacity="0.8"/>`; }
-                s += `</g>`;
                 s += `<path d="${inner}"  fill="none" stroke="${acc}" stroke-width="1.5" opacity="0.65"/>`;
-                s += `<path d="${shield}" fill="none" stroke="${acc}" stroke-width="3"/>`;
-                s += `<text x="50" y="30" text-anchor="middle" dominant-baseline="middle" font-size="13" fill="${acc}">★</text>`;
+                s += this._emblemSVG(this._pickEmblem(seed, name), primaryColor, acc);
                 const fs = initials.length <= 2 ? 27 : 20;
                 s += `<text x="50" y="77" text-anchor="middle" dominant-baseline="middle" font-family="Arial Black,Arial" font-weight="900" font-size="${fs}" fill="${acc}" stroke="rgba(0,0,0,0.55)" stroke-width="2" paint-order="stroke">${initials}</text>`;
+                s += `</g>`;
+                // Outer stroke is drawn LAST so it crisply outlines the shield over the
+                // clipped contents. Unclipped on purpose — clipping it would shave the
+                // outer half of the stroke and make the outline look thinner.
+                s += `<path d="${shield}" fill="none" stroke="${acc}" stroke-width="3"/>`;
                 s += `</svg>`;
                 return s;
             }
@@ -875,47 +935,71 @@
                 this.onField = [];
             }
 
+            // Instance wrapper — the actual roster generation is in the static
+            // `Team.createRoster` so callers without a Team instance (e.g. the
+            // dramatic-scenes test bench, future replay tools) can produce real
+            // game-grade players with one call.
             generatePlayers() {
+                return Team.createRoster(this.jerseyColor, { isYouTeam: this.teamName === 'You' });
+            }
+
+            // Builds a single player object with name, nationality, position,
+            // attributes, avatar, instructions, morale, and per-match stat
+            // counters. Pure function — no `this` dependency. Same fields and
+            // ranges as the original inline body of generatePlayers().
+            //
+            // opts.position — defaults to a sensible per-index pick (idx<2 → GK,
+            // otherwise random outfield) when omitted.
+            static createPlayer(idx, jerseyColor, opts = {}) {
                 const outfieldPositions = ['CB', 'CB', 'CB', 'LB', 'RB', 'CM', 'CM', 'CM', 'LM', 'RM', 'ST', 'ST', 'CAM', 'CDM', 'LW', 'RW', 'CF', 'LWB', 'RWB'];
+                const position = opts.position
+                    || (idx < 2 ? 'GK' : outfieldPositions[Math.floor(Math.random() * outfieldPositions.length)]);
+                const nation = pickNation();
+                const first  = nation.first[Math.floor(Math.random() * nation.first.length)];
+                const last   = nation.last [Math.floor(Math.random() * nation.last.length)];
+                const name   = nation.format === 'last_first' ? `${last} ${first}` : `${first} ${last}`;
+                const attributes = Team.generateAttributes(position, idx);
+
+                return {
+                    id: idx,
+                    name,
+                    flag: nation.flag,
+                    nationality: nation.name,
+                    position,                              // current playing position
+                    naturalPosition: position,             // what they were trained at (1.0× efficiency here)
+                    secondaryPositions: Team.randomSecondaries(position), // 0.88× efficiency
+                    number: idx + 1,
+                    age:    Team.randomAge(),
+                    height: Team.randomHeight(position),    // cm
+                    appearances: 0,
+                    goals: 0,
+                    assists: 0,
+                    isOnField: false,
+                    avatar: AvatarGenerator.generateAvatar(idx, jerseyColor),
+                    instructions: Team.defaultInstructions(position),
+                    morale: Team.randomMorale(),
+                    // Per-match performance counters (live with the player; the spread used by
+                    // setupSquad / subs keeps the same `stats` reference, so writes from any
+                    // reference update the same object).
+                    stats: { dribbles: 0, passes: 0, shots: 0, duelsWon: 0, minutesPlayed: 0, subbedOnMinute: null },
+                    ...attributes,
+                };
+            }
+
+            // Builds a full 20–25-player roster. First 2 are always GKs (so the
+            // squad has a starter + backup); the rest are randomised outfield
+            // positions. If `opts.isYouTeam` is true, slot 6 is overwritten with
+            // the hand-crafted talisman 'Nguyễn Thế Chí Vỹ' (always overall 93).
+            //
+            // opts.count — explicit roster size (default 20–25 random).
+            static createRoster(jerseyColor, opts = {}) {
+                const count = opts.count != null ? opts.count : (20 + Math.floor(Math.random() * 6));
                 const players = [];
-                const count = 20 + Math.floor(Math.random() * 6);
-
                 for (let i = 0; i < count; i++) {
-                    // first 2 players are always GKs so we always have a starter + backup
-                    const position = i < 2 ? 'GK' : outfieldPositions[Math.floor(Math.random() * outfieldPositions.length)];
-                    const nation = pickNation();
-                    const first = nation.first[Math.floor(Math.random() * nation.first.length)];
-                    const last  = nation.last[Math.floor(Math.random() * nation.last.length)];
-                    const name  = nation.format === 'last_first' ? `${last} ${first}` : `${first} ${last}`;
-                    const attributes = this.generateAttributes(position, i);
-
-                    players.push({
-                        id: i,
-                        name,
-                        flag: nation.flag,
-                        nationality: nation.name,
-                        position,                              // current playing position
-                        naturalPosition: position,             // what they were trained at (1.0× efficiency here)
-                        secondaryPositions: Team.randomSecondaries(position), // 0.88× efficiency
-                        number: i + 1,
-                        age:    Team.randomAge(),
-                        height: Team.randomHeight(position),    // cm
-                        appearances: 0,
-                        goals: 0,
-                        assists: 0,
-                        isOnField: false,
-                        avatar: AvatarGenerator.generateAvatar(i, this.jerseyColor),
-                        instructions: Team.defaultInstructions(position),
-                        morale: Team.randomMorale(),
-                        // Per-match performance counters (live with the player; the spread used by
-                        // setupSquad / subs keeps the same `stats` reference, so writes from any
-                        // reference update the same object).
-                        stats: { dribbles: 0, passes: 0, shots: 0, duelsWon: 0, minutesPlayed: 0, subbedOnMinute: null },
-                        ...attributes
-                    });
+                    players.push(Team.createPlayer(i, jerseyColor));
                 }
 
-                if (this.teamName === 'You') {
+                if (opts.isYouTeam && players[6]) {
                     players[6] = {
                         ...players[6],
                         name: 'Nguyễn Thế Chí Vỹ',
@@ -945,7 +1029,7 @@
                 return players;
             }
 
-            generateAttributes(position, seed) {
+            static generateAttributes(position, seed) {
                 const rng = AvatarGenerator.seededRandom(seed);
                 const r = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
 
@@ -975,7 +1059,7 @@
                 }
 
                 // Position-weighted overall rating for squad selection sorting
-                attrs.overall = Math.round(this.computeOverall(position, attrs));
+                attrs.overall = Math.round(Team.computeOverall(position, attrs));
 
                 // Backward-compatible aliases used by display and legacy logic
                 attrs.shooting  = attrs.finishing;
@@ -990,7 +1074,7 @@
                 return attrs;
             }
 
-            computeOverall(position, attrs) {
+            static computeOverall(position, attrs) {
                 const W = {
                     GK:  { reflexes:3,    handling:3,    positioning:2.5, composure:1,    stamina:0.5,  determination:0.5 },
                     CB:  { marking:3,     tackling:3,    heading:2.5,     positioning:2,  anticipation:1.5, strength:1, stamina:0.5 },
@@ -1265,6 +1349,8 @@
                 this._attackLane  = 1;    // 0…2 (top to bottom)
                 this.matchSpeed   = 'fast';   // 'slow' | 'normal' | 'fast' — 'fast' preserves legacy 500ms/1000ms pace
                 this._cpuLastFormationChangeMinute = 0;  // CPU AI cooldown tracker
+                this.audio        = (typeof AudioFx !== 'undefined') ? new AudioFx() : null;
+                this.dramatic     = (typeof DramaticOverlay !== 'undefined') ? new DramaticOverlay(this) : null;
                 this.debugMode    = false;   // toggled by triple-clicking the match clock
                 this._timerClickCount = 0;
                 this._timerClickTimer = null;
@@ -1308,6 +1394,24 @@
 
                     const pauseBtn = document.getElementById('pauseBtn');
                     if (pauseBtn) pauseBtn.addEventListener('click', () => this.togglePause());
+
+                    // Mute toggle for synthetic match sounds. Also serves as the first-gesture
+                    // trigger for AudioContext init on some browsers.
+                    const muteBtn = document.getElementById('muteBtn');
+                    if (muteBtn) {
+                        const savedMuted = localStorage.getItem('footballSimMuted') === '1';
+                        if (savedMuted && this.audio) this.audio.setMuted(true);
+                        muteBtn.textContent = savedMuted ? '🔇' : '🔊';
+                        muteBtn.classList.toggle('muted', savedMuted);
+                        muteBtn.addEventListener('click', () => {
+                            if (!this.audio) return;
+                            this.audio.setMuted(!this.audio.muted);
+                            muteBtn.textContent = this.audio.muted ? '🔇' : '🔊';
+                            muteBtn.classList.toggle('muted', this.audio.muted);
+                            localStorage.setItem('footballSimMuted', this.audio.muted ? '1' : '0');
+                            if (!this.audio.muted) this.audio.click();
+                        });
+                    }
 
                     // Triple-click on the match clock toggles debug mode (zone-rating overlay).
                     const timerEl = document.getElementById('timer');
@@ -1789,53 +1893,78 @@
 
             selectFormation(btn) {
                 try {
-                    console.log('selectFormation called with:', btn);
-                    console.log('btn type:', typeof btn);
-                    console.log('btn.dataset:', btn?.dataset);
-
-                    if (!btn) {
-                        console.error('No button provided to selectFormation');
-                        return;
-                    }
-
+                    if (!btn) return;
                     const formation = btn.dataset.formation;
-                    console.log('Formation from button:', formation);
+                    if (!formation) return;
+                    if (formation === this.playerFormation) return;
 
-                    if (!formation) {
-                        console.error('No data-formation attribute found on button');
-                        return;
-                    }
+                    const oldFormation = this.playerFormation;
 
-                    // Remove selected from all buttons
-                    const allBtns = document.querySelectorAll('.formation-btn');
-                    console.log('Found', allBtns.length, 'formation buttons to update');
-                    allBtns.forEach(b => {
-                        b.classList.remove('selected');
-                        console.log('Removed selected from button:', b.dataset.formation);
-                    });
-
-                    // Add selected to clicked button
-                    console.log('Adding selected class to button with formation:', formation);
+                    document.querySelectorAll('.formation-btn').forEach(b => b.classList.remove('selected'));
                     btn.classList.add('selected');
-                    console.log('Button classes after add:', btn.className);
 
-                    // Save formation
                     this.playerFormation = formation;
-                    console.log('Saved playerFormation:', this.playerFormation);
 
-                    // Enable start button (old formation screen)
                     const startBtn = document.getElementById('startBtn');
                     if (startBtn) startBtn.disabled = false;
 
-                    // In pre-match mode, re-setup squad with new formation and refresh panel
                     if (this.isPreMatch && this.playerTeam) {
+                        // Pre-match: rebuild the squad's starting XI to suit the new shape.
                         this.playerTeam.setupSquad(formation);
                         this.renderManagementPanel();
+                    } else if (this.playerTeam && this.isRunning) {
+                        // Mid-match: keep the current XI but reassign slot roles and animate them
+                        // into the new formation's home positions.
+                        this._applyPlayerFormationChange(oldFormation, formation);
                     }
                 } catch (error) {
                     console.error('Error in selectFormation:', error);
-                    console.error('Error stack:', error.stack);
                 }
+            }
+
+            // Mid-match formation change for the player team. Mirrors changeCpuFormation:
+            // reassigns slot roles, clears customPos overrides (the old drags don't make sense
+            // in a new shape), refreshes MatchFlow's id→player map, recomputes home positions,
+            // animates the team into the new shape, and logs a manager event.
+            _applyPlayerFormationChange(oldFormation, newFormation) {
+                if (this.playerTeam.onField.length !== 11) {
+                    this._flashMgmtNotice(`Can't change formation — playing with ${this.playerTeam.onField.length} on the pitch.`);
+                    // Revert the stored formation
+                    this.playerFormation = oldFormation;
+                    document.querySelectorAll('.formation-btn').forEach(b => {
+                        b.classList.toggle('selected', b.dataset.formation === oldFormation);
+                    });
+                    return;
+                }
+
+                // Clear any per-player drag-positioning overrides — they were valid for the old shape.
+                ['onField', 'bench', 'players'].forEach(k => {
+                    this.playerTeam[k]?.forEach(p => { if (p.customPos) delete p.customPos; });
+                });
+
+                this.playerTeam.assignSlotPositions(newFormation);
+                this._refreshMatchFlowPlayerInfo?.();
+
+                if (this.matchFlow && this.pitchRenderer) {
+                    try {
+                        const formPlayer = [1, ...newFormation.split('').map(Number)];
+                        const playerPositions = this.pitchRenderer.calculatePositions(formPlayer, 1);
+                        playerPositions.forEach((p, i) => this.matchFlow._home.set(i, { x: p.x, y: p.y }));
+                        setTimeout(() => this.matchFlow._reshape('player', 900), 100);
+                    } catch (e) {
+                        console.warn('Player formation reshape failed:', e);
+                    }
+                }
+
+                const minute = this.rules.getMatchMinute(this.timeRemaining);
+                const fmt = f => f.split('').join('-');
+                this.addEvent(
+                    `📋 Manager (${minute}'): ${fmt(oldFormation)} → ${fmt(newFormation)}`,
+                    'card', 'player', 'medium'
+                );
+
+                this.renderManagementPanel();
+                this._flashMgmtNotice(`Formation: ${fmt(oldFormation)} → ${fmt(newFormation)}`, 'ok');
             }
 
             startMatch() {
@@ -1879,6 +2008,14 @@
                     this._initPlayerStats();   // reset per-player performance counters
                     this.isRunning = true;
                     console.log('Starting match...');
+                    this.audio?.whistle(true);  // kick-off whistle
+                    this.dramatic?.play('kickoff', {
+                        attackTeam:  this.playerTeam?.onField || [],
+                        defendTeam:  this.cpuTeam?.onField    || [],
+                        attackColor: this.playerTeam?.jerseyColor,
+                        defendColor: this.cpuTeam?.jerseyColor,
+                        minute: 1,
+                    });
                     this.runMatch();
                     console.log('Match running');
                 } catch (error) {
@@ -2530,6 +2667,8 @@
                 }
                 const assistText = assist ? ` (assist: <b class="ev-name">${assist.name}</b>)` : '';
                 this._addStat(scorer, 'shots');
+                this.audio?.goalRoar();
+                this.dramatic?.play('goal', { name: scorer.name, minute, color: (team === 'player' ? this.playerTeam?.jerseyColor : this.cpuTeam?.jerseyColor) });
                 this.addEvent(`⚽ GOAL (${minute}')! <b class="ev-name">${scorer.name}</b> scores!${assistText}`, 'goal', team);
 
                 this._emitMatchEvent('goal', { scorer: scorerId, team });
@@ -2568,6 +2707,7 @@
                     this.momentum = Math.max(0, this.momentum - 4);
                 }
                 this._addStat(player, 'shots');
+                this.audio?.crowdCheer();
                 this.addEvent(`🎯 ${quality} chance for <b class="ev-name">${player.name}</b>!`, 'chance', team);
                 this._emitMatchEvent('chance', { team });
             }
@@ -2599,6 +2739,7 @@
                     // player tackling style sets foul rate; CPU always uses base 40%
                     const effectiveFoulRate = team === 'player' ? foulRate : 0.40;
                     if (Math.random() < effectiveFoulRate) {
+                        this.audio?.foul();
                         this.addEvent(`🟡 Foul by <b class="ev-name">${defender.name}</b> (${minute}')! Free kick awarded.`, 'tackle', team, 'medium');
 
                         // A foul in the attacker's attacking third is a "dangerous" free kick —
@@ -2718,6 +2859,7 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const keeper = teamObj.onField.find(p => p.position === 'GK');
 
+                this.audio?.save();
                 if (keeper) {
                     const reflexes = keeper.reflexes || 75;
                     const quality = reflexes > 85 ? 'world-class save' : reflexes > 72 ? 'excellent save' : 'decent stop';
@@ -2732,9 +2874,11 @@
             }
 
             substitutionEvent() {
-                const team = Math.random() > 0.5 ? 'player' : 'cpu';
+                // Auto-sub only ever applies to the CPU team — the user manages their own
+                // subs via the Management Panel.
+                const team = 'cpu';
                 if (!this.rules.canSubstitute(team)) return;
-                const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const teamObj = this.cpuTeam;
                 const sub = teamObj.makeSubstitution();
 
                 if (sub) {
@@ -2778,6 +2922,7 @@
                     this.stats.cpuShots++;
                     this.momentum = Math.min(100, this.momentum + 2);
                 }
+                this.audio?.crowdGroan();
                 this.addEvent(`❌ <b class="ev-name">${player.name}</b> ${missDesc}`, 'chance', team);
                 this._emitMatchEvent('miss', { team });
             }
@@ -2786,6 +2931,7 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const player = teamObj.getRandomPlayer(true);
 
+                this.audio?.woodwork();
                 if (team === 'player') {
                     this.stats.playerShots++;
                     this.addEvent(`🔴 <b class="ev-name">${player.name}</b> hits the crossbar!`, 'save', team);
@@ -2798,9 +2944,17 @@
 
             cornerEvent(team) {
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
+                const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
                 const player = teamObj.getRandomPlayer(true);
+                this.audio?.kick();
                 this.addEvent(`🚩 Corner kick! <b class="ev-name">${player.name}</b> delivers into the box`, 'pass', team, 'medium');
                 this._emitMatchEvent('corner', { team });
+                this.dramatic?.play('corner', {
+                    takerColor:     teamObj.jerseyColor,
+                    defenderColor:  defTeamObj.jerseyColor,
+                    attackTeam:     teamObj.onField    || [],
+                    defendTeam:     defTeamObj.onField || [],
+                });
             }
 
             throwInEvent(team) {
@@ -2831,6 +2985,7 @@
                 if (result.cardType === 'yellow') {
                     const count = this.rules.yellowCount(player);
                     this.cardData[team].push({ player: player.name, type: 'yellow', time: minute });
+                    this.audio?.yellowCard();
                     this.addEvent(
                         `🟡 YELLOW CARD (${minute}') — <b class="ev-name">${player.name}</b> is booked!` +
                         (count === 1 ? ' One more and they walk.' : ''),
@@ -2839,6 +2994,8 @@
                 } else if (result.cardType === 'second_yellow') {
                     this.cardData[team].push({ player: player.name, type: 'yellow', time: minute });
                     this.cardData[team].push({ player: player.name, type: 'red',    time: minute });
+                    this.audio?.redCard();
+                    this.dramatic?.play('redCard', { name: player.name, minute, kind: 'second' });
                     this.addEvent(
                         `🟡🔴 SECOND YELLOW (${minute}') — <b class="ev-name">${player.name}</b> is sent off!`,
                         'card', team, 'critical'
@@ -2852,6 +3009,8 @@
                 } else {
                     // Direct red card
                     this.cardData[team].push({ player: player.name, type: 'red', time: minute });
+                    this.audio?.redCard();
+                    this.dramatic?.play('redCard', { name: player.name, minute, kind: 'red' });
                     this.addEvent(
                         `🔴 RED CARD (${minute}') — <b class="ev-name">${player.name}</b> is sent off!`,
                         'card', team, 'critical'
@@ -2899,6 +3058,7 @@
                     this._statSubOn(replacement);
                     this.rules.recordSub(team);
                     this.substitutions.push({ team, playerOut: injuredPlayer.name, playerIn: replacement.name, time: `${minute}'` });
+                    this.dramatic?.play('injury', { name: injuredPlayer.name, minute });
                     this.addEvent(
                         `🚑 <b class="ev-name">${injuredPlayer.name}</b> stretchered off (${minute}')! <b class="ev-name">${replacement.name}</b> comes on`,
                         'injury', team, 'critical'
@@ -2921,6 +3081,17 @@
 
                 const minute = this.rules.getMatchMinute(this.timeRemaining);
                 const fouler = defTeamObj.getRandomPlayer(true);
+                this.audio?.whistle(true);
+                this.audio?.crowdCheer();
+                this.dramatic?.play('penalty', {
+                    name: fouler.name,
+                    minute,
+                    kickerColor: teamObj.jerseyColor,
+                    defColor:    defTeamObj.jerseyColor,
+                    gkColor:     this._gkJerseyColor(defTeamObj.jerseyColor),
+                    attackTeam:  teamObj.onField    || [],
+                    defendTeam:  defTeamObj.onField || [],
+                });
                 this.addEvent(`⚖️ PENALTY (${minute}')! <b class="ev-name">${fouler.name}</b> brings down the attacker in the box!`, 'card', team);
 
                 // Penalty taker: prefer composed forward
@@ -2941,6 +3112,7 @@
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 18); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
                     this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.audio?.goalRoar();
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> coolly slots home the penalty!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
                     this.showCelebration(taker, team);
@@ -2966,6 +3138,14 @@
                 this.addEvent(`📐 Dangerous free kick — <b class="ev-name">${taker.name}</b> stands over it...`, 'pass', team, 'medium');
                 // Trigger the visual setup (wall + taker + runners) on the pitch.
                 this._emitMatchEvent('freekick', { team });
+                // Dramatic SVG scene — taker over the ball, wall + GK ahead.
+                this.dramatic?.play('freekick', {
+                    takerColor: teamObj.jerseyColor,
+                    wallColor: defTeamObj.jerseyColor,
+                    gkColor: this._gkJerseyColor(defTeamObj.jerseyColor),
+                    attackTeam: teamObj.onField    || [],
+                    defendTeam: defTeamObj.onField || [],
+                });
 
                 const skill = ((taker.finishing || 60) + (taker.crossing || 60)) / 2 / 100;
                 const r = Math.random();
@@ -2978,6 +3158,7 @@
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 16); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 12); }
                     this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.audio?.goalRoar();
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> curls a stunning free kick into the top corner!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
                     this.showCelebration(taker, team);
@@ -3025,6 +3206,7 @@
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 10); }
                     this.goals.push({ team, scorer: shooter.name, assister: null, time: `${minute}'` });
+                    this.audio?.goalRoar();
                     this.addEvent(`⚽ SCREAMER! <b class="ev-name">${shooter.name}</b> lets fly from 25 yards — top bins!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
                     this.showCelebration(shooter, team);
@@ -3101,6 +3283,7 @@
                 const striker = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : teamObj.getRandomPlayer(true);
                 const gk = defTeamObj.onField.find(p => p.position === 'GK');
 
+                this.audio?.crowdCheer();
                 this.addEvent(`🎯 <b class="ev-name">${striker.name}</b> is clean through, one-on-one with the keeper!`, 'chance', team);
                 if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
                 this._addStat(striker, 'shots');
@@ -3128,6 +3311,7 @@
                 if (benefits === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
                 else                       { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
                 this.goals.push({ team: benefits, scorer: `${culprit.name} (OG)`, assister: null, time: `${minute}'` });
+                this.audio?.goalRoar();
                 this.addEvent(`😱 OWN GOAL (${minute}')! <b class="ev-name">${culprit.name}</b> turns the ball into his own net!`, 'goal', benefits);
                 this._emitMatchEvent('goal', { team: benefits });
             }
@@ -3136,6 +3320,10 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const scorer = teamObj.getRandomPlayer(true);
                 const reason = Math.random() < 0.6 ? 'offside' : 'foul in the build-up';
+                this.audio?.whistle(true);
+                this.audio?.crowdGroan();
+                // Dramatic 'disallowed' scene intentionally disabled — the event
+                // log + audio cues are enough; the full-screen wash interrupts flow.
                 this.addEvent(`🚫 GOAL DISALLOWED — <b class="ev-name">${scorer.name}</b>'s effort ruled out for ${reason}!`, 'card', team, 'critical');
                 this._emitMatchEvent('offside', { team });
             }
@@ -3158,6 +3346,7 @@
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 22); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 16); }
                     this.goals.push({ team, scorer: acrobat.name, assister: null, time: `${minute}'` });
+                    this.audio?.goalRoar();
                     this.addEvent(`🤸 WONDER GOAL — <b class="ev-name">${acrobat.name}</b> with an outrageous ${move}!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
                     this.showCelebration(acrobat, team);
@@ -3179,6 +3368,7 @@
                 const attObj  = attTeam === 'player' ? this.playerTeam : this.cpuTeam;
                 const fwds    = attObj.onField.filter(p => ['ST','CF','LW','RW'].includes(p.position));
                 const caught  = fwds.length ? fwds[Math.floor(Math.random() * fwds.length)] : attObj.getRandomPlayer(true);
+                this.audio?.foul();
                 this.addEvent(`🚩 Offside! <b class="ev-name">${caught.name}</b> is caught the wrong side of the last defender`, 'pass', attTeam, 'medium');
                 this._emitMatchEvent('offside', { team: attTeam });
             }
@@ -3415,6 +3605,7 @@
 
             openManagement() {
                 this.isPaused = true;
+                this._managementOpen = true;
                 this.isPreMatch = false;
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn = null;
@@ -3422,10 +3613,48 @@
                 this.switchScreen('managementScreen');
             }
 
+            // Short-lived notice shown at the top of the management panel.
+            // Used for "substitution limit reached" and similar feedback that would
+            // otherwise be a silent failure.
+            _flashMgmtNotice(msg, kind = 'warn') {
+                let el = document.getElementById('mgmtNotice');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'mgmtNotice';
+                    el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);' +
+                        'padding:8px 16px;border-radius:6px;font-size:12px;font-weight:bold;' +
+                        'letter-spacing:1px;text-transform:uppercase;z-index:9999;' +
+                        'box-shadow:0 4px 14px rgba(0,0,0,0.5);pointer-events:none;' +
+                        'transition:opacity 0.3s ease;';
+                    document.getElementById('managementScreen')?.appendChild(el);
+                }
+                const palette = kind === 'warn'
+                    ? { bg: '#7c2d12', fg: '#fed7aa', border: '#FF9500' }
+                    : { bg: '#14532d', fg: '#86efac', border: '#22c55e' };
+                el.style.background = palette.bg;
+                el.style.color = palette.fg;
+                el.style.border = `1px solid ${palette.border}`;
+                el.style.opacity = '1';
+                el.textContent = msg;
+                clearTimeout(this._mgmtNoticeTimer);
+                this._mgmtNoticeTimer = setTimeout(() => {
+                    el.style.opacity = '0';
+                }, 2400);
+            }
+
             closeManagement() {
+                this._managementOpen = false;
                 this.isPaused = false;
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn = null;
+                // Popovers (context menu / instructions / arrow picker) live outside the
+                // management screen DOM subtree, so they'd persist over the match screen
+                // unless we explicitly close them here.
+                this._hideAllPlayerPopovers?.();
+                // Keep the match-screen pause button in sync — clicking Close always
+                // resumes the match, so the label should read "Pause", not stale "Resume".
+                const pauseBtn = document.getElementById('pauseBtn');
+                if (pauseBtn) pauseBtn.textContent = 'Pause';
                 this.switchScreen('matchScreen');
             }
 
@@ -3915,6 +4144,7 @@
                     } else {
                         this.selectedPlayerOut = null;
                         this.selectedPlayerIn  = null;
+                        this._flashMgmtNotice(`Substitution limit reached (${this.rules.MAX_SUBS}/${this.rules.MAX_SUBS}).`);
                     }
                     return;
                 }
@@ -3974,7 +4204,20 @@
                 const titleEl = document.getElementById('managementTitle');
                 if (crestEl && this.playerTeam) {
                     crestEl.innerHTML = this.playerTeam.crestSVGSm;
-                    if (titleEl) titleEl.textContent = this.isPreMatch ? '⚽ PICK YOUR SQUAD ⚽' : this.playerTeam.clubName;
+                    if (titleEl) {
+                        if (this.isPreMatch) {
+                            titleEl.textContent = '⚽ PICK YOUR SQUAD ⚽';
+                        } else {
+                            // During the match, show subs-remaining alongside the club name.
+                            const used  = this.rules?.subCount?.player ?? 0;
+                            const total = this.rules?.MAX_SUBS ?? 5;
+                            const left  = Math.max(0, total - used);
+                            const minute = this.timeRemaining != null ? this.rules.getMatchMinute(this.timeRemaining) : null;
+                            const min = minute != null ? `  ·  ${minute}'` : '';
+                            const tag = `  ·  Subs ${left}/${total}`;
+                            titleEl.innerHTML = `${this.playerTeam.clubName}<span style="font-size:0.5em; color:${left > 0 ? '#86EFAC' : '#FCA5A5'}; letter-spacing:1px; margin-left:8px;">${tag}${min}</span>`;
+                        }
+                    }
                 }
 
                 // Re-renders implicitly close any open detail overlay or floating popover.
@@ -3986,14 +4229,16 @@
                 const formSel = document.getElementById('mgmtFormationSelector');
                 const startSec = document.getElementById('startMatchSection');
                 const subCtrl = document.getElementById('subControls');
-                if (formSel) formSel.style.display = this.isPreMatch ? 'block' : 'none';
+                // Formation selector is available in both pre-match and mid-match.
+                if (formSel) formSel.style.display = 'block';
                 if (startSec) startSec.style.display = this.isPreMatch ? 'block' : 'none';
-                if (subCtrl) subCtrl.style.display = 'block';
+                // Sub controls (Close button container) — only meaningful mid-match.
+                if (subCtrl) subCtrl.style.display = this.isPreMatch ? 'none' : 'block';
                 const closeBtnEl = document.getElementById('closeManageBtn');
                 if (closeBtnEl) closeBtnEl.style.display = this.isPreMatch ? 'none' : 'block';
 
                 // Highlight selected formation button
-                if (this.isPreMatch && this.playerFormation) {
+                if (this.playerFormation) {
                     document.querySelectorAll('.formation-btn').forEach(b => {
                         b.classList.toggle('selected', b.dataset.formation === this.playerFormation);
                     });
@@ -4140,11 +4385,9 @@
                 // the new player's instructions drive their movement.
                 this._refreshMatchFlowPlayerInfo();
 
-                if (this.isPreMatch) {
-                    this.renderManagementPanel();
-                } else {
-                    this.closeManagement();
-                }
+                // Re-render in place — don't auto-close mid-match so the user can chain
+                // more subs / tweak tactics without re-opening the panel each time.
+                this.renderManagementPanel();
             }
 
             showCelebration(scorer, team) {
@@ -4197,7 +4440,8 @@
                 setTimeout(() => {
                     this._stopConfetti();
                     celebrationScreen.style.display = 'none';
-                    this.isPaused = false;
+                    // Don't resume if the user opened the Management Panel during the celebration.
+                    if (!this._managementOpen) this.isPaused = false;
                 }, 5000);
             }
 
@@ -4259,6 +4503,7 @@
                 document.getElementById('endBtn').style.display = 'block';
 
                 this._finalizePlayerStats();   // close minute counters for everyone still on
+                this.audio?.whistle(false);    // long full-time whistle
                 this.switchScreen('resultScreen');
                 this.displayResult();
             }

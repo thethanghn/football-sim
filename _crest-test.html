@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crest test</title>
+<style>
+body { background: #222; color: white; font-family: Arial; padding: 20px; }
+.row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 20px; }
+.cell { background: #333; padding: 10px; border: 1px dashed #555; text-align: center; }
+.cell .label { margin-top: 6px; font-size: 12px; color: #aaa; }
+.cell svg { background: rgba(255,255,255,0.05); outline: 1px solid red; }
+h2 { color: #FFD700; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Crest preview — emblems + designs, with outline showing viewBox bounds</h1>
+<h2>All 9 emblems on a single shield design (halves)</h2>
+<div id="emblemRow"></div>
+<h2>All 7 designs, random emblem</h2>
+<div id="designRow"></div>
+
+<script src="random.js"></script>
+<script>
+class Test {
+  static _lum(hex) {
+    const n = parseInt(hex.replace('#',''), 16);
+    return ((n>>16)&255)*0.299 + ((n>>8)&255)*0.587 + (n&255)*0.114;
+  }
+  static _emblemSVG(kind, primaryColor, acc) {
+    const E = {
+      lion: `<g fill="${acc}"><polygon points="50,18 52,22 56,21 56,25 60,26 58,29 62,31 58,33 60,36 56,37 56,41 52,40 50,44 48,40 44,41 44,37 40,36 42,33 38,31 42,29 40,26 44,25 44,21 48,22"/><ellipse cx="50" cy="31" rx="5" ry="6" fill="${primaryColor}"/><circle cx="44.5" cy="26" r="1.4"/><circle cx="55.5" cy="26" r="1.4"/><circle cx="47.5" cy="30" r="0.7"/><circle cx="52.5" cy="30" r="0.7"/><polygon points="49,33 51,33 50,34.5"/><path d="M48,35 Q50,37 52,35" fill="none" stroke="${acc}" stroke-width="0.6"/></g>`,
+      eagle: `<g fill="${acc}"><ellipse cx="50" cy="34" rx="2.5" ry="6"/><path d="M48,32 Q40,25 36,33 Q44,30 48,35 Z"/><path d="M52,32 Q60,25 64,33 Q56,30 52,35 Z"/><circle cx="50" cy="25" r="2.5"/><polygon points="49,27 51,27 50,28.5" fill="${primaryColor}"/><polygon points="48,40 52,40 50,44"/><circle cx="50.6" cy="24.5" r="0.4" fill="${primaryColor}"/></g>`,
+      wolf: `<g fill="${acc}"><polygon points="42,22 46,29 49,28 51,28 54,29 58,22 57,30 60,33 58,38 54,40 46,40 42,38 40,33 43,30"/><circle cx="47.5" cy="32" r="0.7" fill="${primaryColor}"/><circle cx="52.5" cy="32" r="0.7" fill="${primaryColor}"/><polygon points="49,35 51,35 50,37" fill="${primaryColor}"/></g>`,
+      dragon: `<g fill="${acc}"><polygon points="42,20 46,26 47,22"/><polygon points="58,20 54,26 53,22"/><path d="M43,26 L47,25 L53,25 L57,26 L60,30 L60,34 L57,38 L43,38 L40,34 L40,30 Z"/><polygon points="46,38 54,38 56,42 44,42"/><circle cx="47" cy="30" r="1.1" fill="${primaryColor}"/><circle cx="53" cy="30" r="1.1" fill="${primaryColor}"/><circle cx="47" cy="30" r="0.4"/><circle cx="53" cy="30" r="0.4"/><polygon points="48,42 47.5,44 47,42" fill="${primaryColor}"/><polygon points="52,42 52.5,44 53,42" fill="${primaryColor}"/></g>`,
+      phoenix: `<g fill="${acc}"><ellipse cx="50" cy="30" rx="2" ry="5"/><circle cx="50" cy="23" r="2"/><polygon points="49,25 51,25 50,27" fill="${primaryColor}"/><path d="M48,27 Q42,18 40,26 Q45,25 48,32 Z"/><path d="M52,27 Q58,18 60,26 Q55,25 52,32 Z"/><polygon points="46,35 47.5,42 49,36 50,42 51,36 52.5,42 54,35"/></g>`,
+      rose: `<g fill="${acc}"><ellipse cx="50" cy="24" rx="3" ry="5"/><ellipse cx="50" cy="40" rx="3" ry="5"/><ellipse cx="45" cy="27.5" rx="5" ry="3" transform="rotate(-60 45 27.5)"/><ellipse cx="55" cy="27.5" rx="5" ry="3" transform="rotate(60 55 27.5)"/><ellipse cx="45" cy="36.5" rx="5" ry="3" transform="rotate(60 45 36.5)"/><ellipse cx="55" cy="36.5" rx="5" ry="3" transform="rotate(-60 55 36.5)"/><circle cx="50" cy="32" r="3" fill="${primaryColor}"/><circle cx="50" cy="32" r="1.4"/></g>`,
+      fleur: `<g fill="${acc}"><path d="M50,20 Q47,28 49,32 L51,32 Q53,28 50,20 Z"/><path d="M49,32 Q41,28 41,38 Q47,35 50,32 Z"/><path d="M51,32 Q59,28 59,38 Q53,35 50,32 Z"/><rect x="42" y="33.5" width="16" height="2.5"/><polygon points="47,36 53,36 50,42"/></g>`,
+      crown: `<g fill="${acc}"><polygon points="40,34 40,28 44,30 47,25 50,29 53,25 56,30 60,28 60,34"/><rect x="40" y="34" width="20" height="5"/><circle cx="47" cy="25.5" r="0.8" fill="${primaryColor}"/><circle cx="50" cy="28" r="0.8" fill="${primaryColor}"/><circle cx="53" cy="25.5" r="0.8" fill="${primaryColor}"/><circle cx="45" cy="36.5" r="0.6" fill="${primaryColor}"/><circle cx="50" cy="36.5" r="0.6" fill="${primaryColor}"/><circle cx="55" cy="36.5" r="0.6" fill="${primaryColor}"/></g>`,
+      star: `<polygon points="50,21 52.4,28.5 60.5,28.5 53.9,33.2 56.4,40.7 50,36 43.6,40.7 46.1,33.2 39.5,28.5 47.6,28.5" fill="${acc}"/>`,
+    };
+    return E[kind] || E.star;
+  }
+  static gen(seed, primaryColor, size, forcedDesign, initials, emblemKind) {
+    const h = Math.round(size * 1.2);
+    const sec = this._lum(primaryColor) > 140 ? '#1a1a2e' : '#FFFFFF';
+    const acc = '#FFD700';
+    const design = forcedDesign;
+    const uid = `cr${seed}_${Math.random().toString(36).slice(2,7)}`;
+    const shield = 'M50,5 L95,20 L95,75 Q95,108 50,118 Q5,108 5,75 L5,20 Z';
+    const inner = 'M50,12 L88,25 L88,73 Q88,102 50,111 Q12,102 12,73 L12,25 Z';
+    let s = `<svg width="${size}" height="${h}" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">`;
+    s += `<defs><clipPath id="${uid}"><path d="${shield}"/></clipPath></defs>`;
+    s += `<path d="${shield}" fill="rgba(0,0,0,0.22)" transform="translate(2,2)"/>`;
+    s += `<path d="${shield}" fill="${primaryColor}"/>`;
+    s += `<g clip-path="url(#${uid})">`;
+    if (design==='halves') s += `<rect x="50" y="0" width="50" height="120" fill="${sec}" opacity="0.85"/>`;
+    else if (design==='quarters') { s += `<rect x="50" y="0" width="50" height="62" fill="${sec}" opacity="0.85"/>`; s += `<rect x="0" y="62" width="50" height="58" fill="${sec}" opacity="0.85"/>`; }
+    else if (design==='stripes') { s += `<rect x="20" y="0" width="20" height="120" fill="${sec}" opacity="0.85"/>`; s += `<rect x="60" y="0" width="20" height="120" fill="${sec}" opacity="0.85"/>`; }
+    else if (design==='chevron') s += `<polygon points="0,52 50,88 100,52 100,72 50,108 0,72" fill="${sec}" opacity="0.85"/>`;
+    else if (design==='diagonal') s += `<polygon points="0,0 65,0 100,50 100,120 35,120 0,70" fill="${sec}" opacity="0.72"/>`;
+    else if (design==='cross') { s += `<rect x="40" y="0" width="20" height="120" fill="${sec}" opacity="0.8"/>`; s += `<rect x="0" y="44" width="100" height="22" fill="${sec}" opacity="0.8"/>`; }
+    s += `<path d="${inner}" fill="none" stroke="${acc}" stroke-width="1.5" opacity="0.65"/>`;
+    s += this._emblemSVG(emblemKind || 'star', primaryColor, acc);
+    const fs = initials.length <= 2 ? 27 : 20;
+    s += `<text x="50" y="77" text-anchor="middle" dominant-baseline="middle" font-family="Arial Black,Arial" font-weight="900" font-size="${fs}" fill="${acc}" stroke="rgba(0,0,0,0.55)" stroke-width="2" paint-order="stroke">${initials}</text>`;
+    s += `</g>`;
+    s += `<path d="${shield}" fill="none" stroke="${acc}" stroke-width="3"/>`;
+    s += `</svg>`;
+    return s;
+  }
+}
+
+const emblems = ['lion','eagle','wolf','dragon','phoenix','rose','fleur','crown','star'];
+const designs = ['halves','quarters','stripes','chevron','diagonal','cross','plain'];
+const colors  = ['#CC0000','#1133CC','#0a7a3c','#222266','#222'];
+
+const emblemRow = document.getElementById('emblemRow');
+emblems.forEach((e, i) => {
+  [70, 44].forEach(size => {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML = Test.gen(i+1, colors[i%colors.length], size, 'halves', 'FC', e);
+    const lbl = document.createElement('div');
+    lbl.className = 'label';
+    lbl.textContent = `${e} (${size}px)`;
+    cell.appendChild(lbl);
+    emblemRow.appendChild(cell);
+  });
+});
+
+const designRow = document.getElementById('designRow');
+designs.forEach((d, i) => {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.innerHTML = Test.gen(i+10, colors[i%colors.length], 70, d, 'RFC', emblems[i%emblems.length]);
+  const lbl = document.createElement('div');
+  lbl.className = 'label';
+  lbl.textContent = `${d} + ${emblems[i%emblems.length]}`;
+  cell.appendChild(lbl);
+  designRow.appendChild(cell);
+});
+</script>
+</body>
+</html>
