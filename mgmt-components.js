@@ -193,6 +193,19 @@ window.MgmtComponents = {
         </div>`;
     },
 
+    // Auto-XI panel — two buttons that re-pick the starting XI for the
+    // current formation. Pre-match-only (hidden mid-match by the renderer).
+    buildAutoXIPanel() {
+        return `
+        <div class="mgmt-section auto-xi-panel" data-section="auto-xi" style="flex-shrink: 0;">
+            <div style="color: #FFD700; font-weight: bold; font-size: 11px; text-align: center; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 1px;">🎯 Auto-Select Starting XI</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+                <button class="auto-xi-btn" data-auto-xi="score"  type="button" title="Pick the highest-rated player for every position (natural fits preferred)">📊 By Score</button>
+                <button class="auto-xi-btn" data-auto-xi="morale" type="button" title="Prioritise players in top / good match-day morale">🔥 By Morale</button>
+            </div>
+        </div>`;
+    },
+
     // Auto-substitution policies (Tactic view only). Three rows for Injury /
     // Stamina / Performance. Buttons reuse the .tactic-btn style but carry
     // a data-autosub attribute so the delegated handler in football-sim.js
@@ -262,6 +275,7 @@ window.MgmtComponents = {
                     ${this.buildFormationPitch()}
 
                     <div class="mgmt-settings-pane" style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; padding-right: 4px;">
+                        ${this.buildAutoXIPanel()}
                         ${this.buildPendingSubsPanel()}
                         ${this.buildFormationSelector()}
                         ${this.buildTacticPanel()}
@@ -292,6 +306,7 @@ window.MgmtComponents = {
                     ${this.buildFormationPitch()}
 
                     <div class="mgmt-settings-pane" style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; padding-right: 4px;">
+                        ${this.buildAutoXIPanel()}
                         ${this.buildFormationSelector()}
                         ${this.buildTacticPanel()}
                         ${this.buildAutoSubPanel()}

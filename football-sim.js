@@ -1622,72 +1622,98 @@
                 };
             }
 
-            setupSquad(formation) {
-                const formationNums = {
-                    '442': [1, 4, 4, 2],
-                    '433': [1, 4, 3, 3],
-                    '451': [1, 4, 5, 1],
-                    '532': [1, 5, 3, 2],
-                    '541': [1, 5, 4, 1],
-                    '352': [1, 3, 5, 2],
-                    '343': [1, 3, 4, 3]
+            // CM 03/04-style morale tier → numeric score used as the primary
+            // sort key in `setupSquad({ metric: 'morale' })`.
+            static moraleScore(morale) {
+                return ({ top: 100, good: 80, normal: 60, poor: 40, terrible: 20 })[morale] || 50;
+            }
+
+            setupSquad(formation, opts = {}) {
+                // Walk the formation's SLOT_POSITIONS in order and, for each
+                // slot, pick the unused player that maximises
+                //     baseScore(p) × Team._rolePenalty(p, slot)
+                //
+                // `_rolePenalty` is the priority the user wants:
+                //   1.00  player's naturalPosition matches the slot
+                //   0.88  slot is in the player's secondaryPositions
+                //   0.72  same position family (CB↔CDM, LB↔LWB, CM↔CAM, …)
+                //   0.50  cross-family fallback
+                //
+                // So a natural CB at OVR 80 (80 × 1.00 = 80) wins the CB slot
+                // over a "better" LB at OVR 85 played as CB (85 × 0.88 = 74.8),
+                // and the LB falls through to a wide slot where they belong.
+                const slots = Team.SLOT_POSITIONS[formation] || Team.SLOT_POSITIONS['442'];
+                const needed = slots.length;   // 11
+
+                // Picker score per metric. `morale` uses morale tier as the
+                // primary axis with overall as a tiebreaker so a "good" 75
+                // ranks above a "normal" 90 (the manager prioritises form),
+                // but two equally-moraled players sort by quality.
+                const metric = opts.metric || 'overall';
+                const baseScore = (p) => {
+                    if (metric === 'morale') return Team.moraleScore(p.morale) + (p.overall || 0) * 0.05;
+                    return p.overall || 0;
                 };
-
-                const nums = formationNums[formation] || formationNums['442'];
-                const needed = nums.reduce((a, b) => a + b, 0); // always 11
-
-                const byOverall = arr => [...arr].sort((a, b) => (b.overall || 0) - (a.overall || 0));
-                const gks  = byOverall(this.players.filter(p => p.position === 'GK'));
-                const defs = byOverall(this.players.filter(p => ['CB','LB','RB','RWB','LWB'].includes(p.position)));
-                const mids = byOverall(this.players.filter(p => ['CM','CDM','CAM','LM','RM','LW','RW'].includes(p.position)));
-                const fwds = byOverall(this.players.filter(p => ['ST','CF'].includes(p.position)));
 
                 const used = new Set();
-                const pick = (pool, n) => {
-                    const out = [];
-                    for (const p of pool) {
-                        if (out.length >= n) break;
-                        if (!used.has(p.id)) { out.push(p); used.add(p.id); }
-                    }
-                    return out;
-                };
-
                 const lineup = [];
 
-                // GK — always first (pitch renderer maps index 0 → GK position)
-                const gkPick = pick(gks, 1);
-                if (gkPick.length === 0) {
-                    const fallback = this.players.find(p => !used.has(p.id));
-                    if (fallback) { fallback.position = 'GK'; gkPick.push(fallback); used.add(fallback.id); }
+                for (const slot of slots) {
+                    let best = null;
+                    let bestScore = -Infinity;
+                    for (const p of this.players) {
+                        if (used.has(p.id)) continue;
+                        const score = baseScore(p) * Team._rolePenalty(p, slot);
+                        if (score > bestScore) { bestScore = score; best = p; }
+                    }
+                    if (best) {
+                        used.add(best.id);
+                        lineup.push(best);
+                    }
                 }
-                lineup.push(...gkPick);
 
-                lineup.push(...pick(defs, nums[1]));
-                lineup.push(...pick(mids, nums[2]));
-
-                // Special player — guaranteed in forward section for player team
+                // Special player — guaranteed in the user team's XI. If the
+                // greedy pass didn't already include them, swap them in for
+                // the lowest-scoring forward (or last picked, as fallback).
                 if (this.teamName === 'You') {
                     const special = this.players.find(p => p.name === 'Nguyễn Thế Chí Vỹ');
                     if (special && !used.has(special.id)) {
-                        lineup.push(special);
-                        used.add(special.id);
+                        const fwdSet = new Set(['ST', 'CF', 'CAM', 'LW', 'RW']);
+                        let weakestIdx = -1, weakestScore = Infinity;
+                        slots.forEach((slot, i) => {
+                            if (fwdSet.has(slot) && lineup[i]) {
+                                const s = baseScore(lineup[i]);
+                                if (s < weakestScore) { weakestScore = s; weakestIdx = i; }
+                            }
+                        });
+                        if (weakestIdx === -1) weakestIdx = lineup.length - 1;
+                        if (weakestIdx >= 0 && lineup[weakestIdx]) {
+                            used.delete(lineup[weakestIdx].id);
+                            lineup[weakestIdx] = special;
+                            used.add(special.id);
+                        }
                     }
                 }
 
-                lineup.push(...pick(fwds, nums[3]));
-
-                // Fill any shortfall with the best remaining non-GK players
+                // Fill any shortfall (squad short of 11) with best remaining.
                 if (lineup.length < needed) {
-                    const rest = byOverall(this.players.filter(p => !used.has(p.id) && p.position !== 'GK'));
-                    lineup.push(...pick(rest, needed - lineup.length));
+                    const rest = this.players
+                        .filter(p => !used.has(p.id))
+                        .sort((a, b) => baseScore(b) - baseScore(a));
+                    for (const p of rest) {
+                        if (lineup.length >= needed) break;
+                        lineup.push(p);
+                        used.add(p.id);
+                    }
                 }
 
                 this.startingXI = lineup.slice(0, needed);
-                this.bench = this.players.filter(p => !this.startingXI.find(s => s.id === p.id));
+                this.bench = this.players.filter(p => !used.has(p.id));
                 this.onField = this.startingXI.map(p => ({...p, isOnField: true}));
 
-                // Force each onField slot to play its formation-expected role. Natural positions
-                // are preserved so the efficiency penalty kicks in for mismatches.
+                // Force each onField slot to play its formation-expected role.
+                // Natural positions are preserved so the efficiency penalty
+                // (and out-of-position UI warning) still kicks in for mismatches.
                 this.assignSlotPositions(formation);
                 // Bench players go back to their natural position label.
                 this.bench.forEach(p => { p.position = p.naturalPosition || p.position; });
@@ -2843,6 +2869,31 @@
             // Evaluation runs each event tick (throttled), picks the best bench
             // replacement, and executes the sub via _executeAutoSub.
 
+            // Auto-pick the starting XI for the current formation by metric.
+            // 'score'  → highest overall per slot, weighted by _rolePenalty
+            // 'morale' → morale tier first, overall as tiebreaker
+            // Pre-match only — mid-match would silently bypass the 5-sub limit.
+            autoSelectXI(metric) {
+                if (!this.playerTeam) return;
+                const isLiveMatch = this.isRunning && !this.isPreMatch;
+                if (isLiveMatch) {
+                    this._flashMgmtNotice?.('Auto-XI is only available before kickoff.', 'warn');
+                    return;
+                }
+                const m = metric === 'morale' ? 'morale' : 'overall';
+                const before = new Set((this.playerTeam.onField || []).map(p => p.id));
+                this.playerTeam.setupSquad(this.playerFormation, { metric: m });
+                const after = new Set((this.playerTeam.onField || []).map(p => p.id));
+                let swapped = 0;
+                after.forEach(id => { if (!before.has(id)) swapped++; });
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.savePlayerTeam(this.playerTeam.serialize());
+                }
+                this.renderManagementPanel();
+                const label = (m === 'morale') ? 'morale' : 'overall score';
+                this._flashMgmtNotice?.(`Auto-XI by ${label}: ${swapped} change${swapped === 1 ? '' : 's'}.`, 'ok');
+            }
+
             _setAutoSub(key, value) {
                 if (!this.tactics.autoSubs) {
                     this.tactics.autoSubs = { onInjury: 'on', onStamina: 'off', onPerformance: 'off' };
@@ -2979,6 +3030,11 @@
                         // but carry data-autosub instead of data-tactic.
                         if (tb && tb.dataset.autosub) {
                             this._setAutoSub(tb.dataset.autosub, tb.dataset.value);
+                            return;
+                        }
+                        const ax = e.target.closest('.auto-xi-btn');
+                        if (ax && ax.dataset.autoXi) {
+                            this.autoSelectXI(ax.dataset.autoXi);
                             return;
                         }
                         const closeX = e.target.closest('.player-detail-close-btn');
@@ -7791,6 +7847,12 @@
                         b.classList.toggle('selected', b.dataset.formation === this.playerFormation);
                     });
                 }
+
+                // Auto-XI panel — hide during a live match (mid-match it would
+                // bypass the sub quota). Visible at kickoff + in the Tactic view.
+                const isLive = this.isRunning && !this.isPreMatch;
+                const autoXIPanel = scope.querySelector('[data-section="auto-xi"]');
+                if (autoXIPanel) autoXIPanel.style.display = isLive ? 'none' : '';
 
                 // Sync tactic button active states (within this scope only).
                 // .tactic-btn[data-tactic]  → team tactic value

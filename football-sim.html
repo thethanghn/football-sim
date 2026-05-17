@@ -137,6 +137,26 @@
 
         .formation-btn.selected .formation-desc { color: var(--c-gold); opacity: 0.8; }
 
+        /* Auto-XI buttons (in both Tactic + Match-Mgmt layouts, pre-match) */
+        .auto-xi-btn {
+            padding: 8px 6px;
+            border: 1px solid rgba(255,215,0,0.45);
+            border-radius: var(--r-sm);
+            background: rgba(20, 24, 38, 0.65);
+            color: #eee;
+            font-family: inherit;
+            font-size: 11px; font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+        }
+        .auto-xi-btn:hover {
+            background: rgba(255,215,0,0.10);
+            border-color: var(--c-gold);
+            color: var(--c-gold);
+        }
+        .auto-xi-btn:active { transform: translateY(1px); }
+
         /* ═══════════════════════════════════════════════════════
            MATCH SCREEN
         ════════════════════════════════════════════════════════ */
@@ -951,6 +971,34 @@
                 rgba(0,0,0,0) 0px, rgba(0,0,0,0) 30px,
                 rgba(0,0,0,0.07) 30px, rgba(0,0,0,0.07) 60px
             );
+        }
+        /* Clubhouse Tactic-view pitch: full width of its column, real 68:105
+           portrait ratio. Explicit width is required — the pitch's children
+           are absolutely positioned so it has no intrinsic width for
+           aspect-ratio to compute against. */
+        .mgmt-panel-tactic .fm-pitch {
+            flex: 0 0 auto;
+            width: 100%;
+            max-width: none;            /* fill the whole column */
+            aspect-ratio: 68 / 105;
+            min-height: 0;
+            margin: 6px 0;
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 4px;
+            align-self: stretch;
+        }
+        .mgmt-panel-tactic [data-section="pitch"] {
+            justify-content: flex-start;
+            align-items: stretch;
+            overflow: visible;
+        }
+        /* Outer right-stack normally splits 2fr / 1fr (pitch on top, settings
+           below). For the Tactic view we want the pitch panel to shrink to
+           its content (the pitch + its title bar) and let the settings pane
+           take whatever's left — otherwise the panel keeps the full 2/3 row
+           height with empty grass below the smaller portrait pitch. */
+        .mgmt-panel-tactic .mgmt-right-stack {
+            grid-template-rows: auto 1fr !important;
         }
         .fm-field-lines { position: absolute; inset: 0; pointer-events: none; }
         .fm-line-center {
@@ -2953,7 +3001,7 @@
          the [data-screen] placeholders below. football-sim.js's bootstrap
          waits for the 'screensReady' event before calling getElementById on
          injected nodes. -->
-    <script src="screens/screen-loader.js?v=25"></script>
+    <script src="screens/screen-loader.js?v=31"></script>
 </head>
 <body>
     <!-- Top floating menu bar (always visible) -->
@@ -3340,26 +3388,26 @@
     <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
     <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
 
-    <script src="audio.js?v=25"></script>
-    <script src="dramatic.js?v=25"></script>
+    <script src="audio.js?v=31"></script>
+    <script src="dramatic.js?v=31"></script>
     <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
-    <script src="dramatic-scenes/_helpers.js?v=25"></script>
-    <script src="dramatic-scenes/goal.js?v=25"></script>
-    <script src="dramatic-scenes/freekick.js?v=25"></script>
-    <script src="dramatic-scenes/kickoff.js?v=25"></script>
-    <script src="dramatic-scenes/corner.js?v=25"></script>
-    <script src="dramatic-scenes/redCard.js?v=25"></script>
-    <script src="dramatic-scenes/disallowed.js?v=25"></script>
-    <script src="dramatic-scenes/penalty.js?v=25"></script>
-    <script src="dramatic-scenes/injury.js?v=25"></script>
-    <script src="random.js?v=25"></script>
-    <script src="storage.js?v=25"></script>
-    <script src="screens/onboarding-data.js?v=25"></script>
-    <script src="league-generator.js?v=25"></script>
-    <script src="mgmt-components.js?v=25"></script>
-    <script src="game-flow.js?v=25"></script>
-    <script src="zone-strength.js?v=25"></script>
-    <script src="football-sim.js?v=25"></script>
-    <script src="phaser-badge.js?v=25"></script>
+    <script src="dramatic-scenes/_helpers.js?v=31"></script>
+    <script src="dramatic-scenes/goal.js?v=31"></script>
+    <script src="dramatic-scenes/freekick.js?v=31"></script>
+    <script src="dramatic-scenes/kickoff.js?v=31"></script>
+    <script src="dramatic-scenes/corner.js?v=31"></script>
+    <script src="dramatic-scenes/redCard.js?v=31"></script>
+    <script src="dramatic-scenes/disallowed.js?v=31"></script>
+    <script src="dramatic-scenes/penalty.js?v=31"></script>
+    <script src="dramatic-scenes/injury.js?v=31"></script>
+    <script src="random.js?v=31"></script>
+    <script src="storage.js?v=31"></script>
+    <script src="screens/onboarding-data.js?v=31"></script>
+    <script src="league-generator.js?v=31"></script>
+    <script src="mgmt-components.js?v=31"></script>
+    <script src="game-flow.js?v=31"></script>
+    <script src="zone-strength.js?v=31"></script>
+    <script src="football-sim.js?v=31"></script>
+    <script src="phaser-badge.js?v=31"></script>
 </body>
 </html>
