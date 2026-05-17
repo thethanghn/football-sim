@@ -4,11 +4,19 @@ A browser-based football match simulator inspired by Championship Manager 01/02 
 
 ```
 football-sim/
-├── football-sim.html   # markup + all CSS; entry point
-├── football-sim.js     # simulator, UI, FSM, events, rendering glue
-├── game-flow.js        # MatchFlow — pitch animation / ball movement
-├── zone-strength.js    # ZoneStrength — pure zone-rating calculators
-└── random.js           # Random — seeded LCG + pick / range / chance / shuffle / gaussian
+├── football-sim.html        # markup + all CSS; entry point
+├── football-sim.js          # simulator, UI, FSM, events, rendering glue
+├── game-flow.js             # MatchFlow — pitch animation / ball movement
+├── zone-strength.js         # ZoneStrength — pure zone-rating calculators
+├── league-generator.js      # LeagueGenerator — table, fixtures, simulateMatch (persistent rosters)
+├── mgmt-components.js       # MgmtComponents — composable Match-Mgmt / Tactic-view panels
+├── storage.js               # GameStorage — localStorage wrapper (manager, league, fixtures, …)
+├── random.js                # Random — seeded LCG + pick / range / chance / shuffle / gaussian
+├── audio.js                 # AudioFx — synthesised match audio
+├── dramatic.js              # DramaticOverlay — cinematic SVG scenes
+├── dramatic-scenes/         # Per-event scene helpers (goal, penalty, freekick, …)
+├── screens/                 # Loaded partials: clubhouse, match, management, result, formation
+└── football-sim-deploy/     # Vercel deploy mirror (built from the above)
 ```
 
 ---
@@ -306,7 +314,7 @@ terrible 10 %     ↓  purple       ×0.88
 
 The arrow glyph appears:
 - inline in the bench player item (small, next to the position line);
-- floated top-right of each formation-pitch slot.
+- as a **circular floating badge at the top-LEFT of each formation-pitch slot**, tinted to the morale tier — mirrors the overall-rating badge at top-right (see §7.3).
 
 Engine effect: `ZoneStrength.moraleMult(player)` multiplies the per-player rating contribution. A team collectively in poor form drops 5–12 % across all three zone bands. Visible in the debug zone grid as lower numbers per cell.
 
@@ -382,7 +390,14 @@ For each formation, `setupSquad`:
 
 ## 7. Management Panel UI
 
-Three-column-ish layout: `grid-template-columns: 1fr 2fr` outer, right side stacked `2fr 1fr`.
+The XI/tactics editor is a **reusable component** (`mgmt-components.js`) composed into two layouts that share the same inner panel:
+
+- **Match Management screen** (`#managementScreen`) — independent fullscreen used at kickoff and mid-match. Composes: bench list · live score chip · formation pitch · formation selector · tactic panel · primary action button (Kick Off / Resume Match).
+- **Clubhouse → Tactics & XI view** (`.ch-view-tactic`) — embedded planning view. Composes: squad-depth list · next-match preview chip · formation pitch · formation selector · tactic panel · preset slot. No primary action — the clubhouse menu handles navigation.
+
+Both mount the same `.mgmt-panel` builders, so renderers operate on a scoped DOM tree via `_getActiveMgmtScope()`. The variant class on the panel root (`.mgmt-panel-match` / `.mgmt-panel-tactic`) keeps per-screen CSS or scope-aware logic possible.
+
+Outer grid: `grid-template-columns: 1fr 2fr`, right side stacked `2fr 1fr`.
 
 ```
 ┌──────────────┬────────────────────────────┐
@@ -390,24 +405,26 @@ Three-column-ish layout: `grid-template-columns: 1fr 2fr` outer, right side stac
 │  (bench)     │  (formation pitch — 2/3)   │
 │   1fr        ├────────────────────────────┤
 │              │  ⚙ Formation / Tactics /   │
-│              │    Sub Controls (1/3)      │
+│              │    Primary action (1/3)    │
 └──────────────┴────────────────────────────┘
 ```
 
 ### 7.1 Substitution
 
-- **Drag-and-drop** is the only path:
+Two interchangeable paths — drag works on desktop, tap on touch devices:
+
+- **Drag-and-drop** (desktop):
   - Bench → starting-XI slot = swap (routes through `confirmSubstitution`, respects sub quota in-match).
   - XI → bench player = swap.
   - XI → XI = swap formation positions.
   - XI → empty pitch area = sets `player.customPos` (clamped ±15 from formation default).
-- **Click** on a starter opens a 3-option floating context menu:
-  - 📋 View Details → opens the detail overlay (radar + attribute bars) over the formation pitch.
-  - ⚙ Set Instructions → opens a floating popover anchored to the player slot with 6 instruction rows.
-  - 🎯 Set Movement Arrow → opens a smaller popover with the 3×3 compass picker.
-- **Click** on a bench player → opens the detail overlay directly.
+- **Tap → context menu** (touch + desktop):
+  - Tap a starter or bench player → floating menu with **🔄 Substitute** at top, plus details/instructions/arrow for starters.
+  - `🔄 Substitute` marks the player via `selectPlayer`. Pick one from XI and one from the bench (either order) and `selectPlayer` auto-confirms the swap.
 
-Only one popover/overlay visible at a time; outside-click and Escape close.
+Mobile-only because HTML5 drag-and-drop doesn't fire on touch devices; on desktop both paths are available.
+
+Other tap actions on a starter's context menu: **📋 View Details** (radar + attribute bars), **⚙ Set Instructions** (8-row popover), **🎯 Set Movement Arrow** (3×3 compass). Bench players hide Instructions + Arrow (only meaningful on the pitch). Only one popover/overlay visible at a time; outside-click and Escape close.
 
 ### 7.2 Player list
 
@@ -415,7 +432,20 @@ Each item shows: avatar (with GK-kit override) · name · `Nationality · Positi
 
 ### 7.3 Formation pitch
 
-Each slot is `<button>` with an avatar, name, position + overall, stamina bar, and `draggable="true"`. Movement arrows are drawn as a single SVG overlay (`fm-arrows-overlay`) above the field lines.
+Each slot is `<button draggable="true">` containing avatar, last name, and stamina bar. Two **floating circular badges** sit on the card chrome:
+
+- **Top-right** — overall rating, background tinted to the OVR tier colour (purple ≥ 90 / dark green ≥ 80 / light green ≥ 70 / grey ≥ 60 / yellow ≥ 50 / red <50). White text + drop shadow for legibility on every tier.
+- **Top-left** — match-day morale arrow, background tinted to the morale tier (red ↑ / orange ↗ / yellow → / blue ↘ / purple ↓). Same chrome as the OVR badge.
+
+The natural (primary) position is rendered inside `.pos-primary` so it stands out from the secondaries — e.g. **ST**/CF/CAM. Out-of-position slots wrap the whole label in orange with an asterisk. Movement arrows are drawn as a single SVG overlay (`fm-arrows-overlay`) above the field lines.
+
+### 7.4 Live score chip (Match Mgmt only)
+
+Pinned above the main grid during a live match: `<Club> 2 – 1 <Opponent> · 73' · Subs 3/5`. Hidden before kickoff. Renders from `renderManagementPanel()` and ticks via `updateUI()`, so the chip stays in sync with the match clock + score without polling.
+
+### 7.5 Next-match preview chip (Tactic view only)
+
+Pinned above the main grid in the clubhouse Tactic view: `vs <Opponent> (H/A) · <Date>`. Reads from `_findNextUserFixture()`. Hidden when no fixtures remain.
 
 ---
 
@@ -492,7 +522,7 @@ Triggers:
 
 ## 9. Speed Modes
 
-Three options via buttons next to Pause in the match-screen controls:
+Three options. **Pause / Speed / Mute all live in the top hamburger dropdown** — the match view itself only keeps the **Manage Team** button so the HUD stays clean.
 
 | Speed | Event tick | Timer tick |
 |---|---|---|
@@ -500,7 +530,7 @@ Three options via buttons next to Pause in the match-screen controls:
 | ▶️ Normal | 1000 ms | 2000 ms |
 | 🐢 Slow | 1500 ms | 3000 ms |
 
-Changing speed mid-match takes effect on the next tick — implemented via recursive `setTimeout` that reads the current speed each iteration.
+Cycle via the **⚡ Match speed** header item (Fast → Normal → Slow → Fast). The dropdown also exposes **⏸ Pause match** (disabled outside a match), **🔊 Sound**, **🐛 Debug overlay**, **📜 Match history**, and **🔄 Reset career**. Changing speed mid-match takes effect on the next tick — implemented via recursive `setTimeout` that reads the current speed each iteration.
 
 ---
 
@@ -530,7 +560,7 @@ Match ends at `timeRemaining === 0` → `endMatch()` switches to the result scre
 
 ### 11.2 Substitution rules
 
-`FootballRules.MAX_SUBS = 3`. Quotas tracked per team via `recordSub` / `canSubstitute` / `subsRemaining`. Drag-substitute calls `confirmSubstitution`, which checks the quota (skipping in pre-match) and then calls `assignSlotPositions(formation)` so the incoming player adopts the slot's expected role. The outgoing player's `position` is reset to their `naturalPosition` as they leave the field.
+`FootballRules.MAX_SUBS = 5`. Quotas tracked per team via `recordSub` / `canSubstitute` / `subsRemaining`. Substitutions (drag OR tap → 🔄 context-menu action) all route through `confirmSubstitution`, which checks the quota (skipping in pre-match) and then calls `assignSlotPositions(formation)` so the incoming player adopts the slot's expected role. The outgoing player's `position` is reset to their `naturalPosition` as they leave the field.
 
 ### 11.3 Cards & sendings-off
 
@@ -565,7 +595,102 @@ The `Math.random()` calls scattered through the engine (event probabilities, for
 
 ---
 
-## 13. Inspirations & sources
+## 13. Clubhouse, league table & leaderboards
+
+The **Clubhouse** screen (`#clubhouseScreen`) is the post-onboarding home base. Left rail (or mobile bottom-sheet, see §15) routes between sub-views; the right pane (`.clubhouse-stage`) hosts whichever view is active. All sub-views live inside the same screen — they're toggled via `.ch-view.active`.
+
+| Menu item | View | Key data |
+|---|---|---|
+| 🏟️ Stadium | stadium illustration | kit-colour stadium SVG with `Home of <Club>` banner |
+| 👥 Squad | portrait list + detail overlay | `playerTeam.players` with stamina, position, overall |
+| 📋 Tactics & XI | embedded mgmt panel (Tactic variant) | XI editor + next-match chip (§7.5) |
+| 🏆 League Table | standings + leaderboards (§13.1) | `LeagueGenerator.sortTable(league)` + `_aggregateTopScorersAndAssists()` |
+| 📅 Fixtures | round-by-round fixture list | grouped by round; past dimmed, today highlighted, future bright |
+| ⚽ Play Next Match | matchup card + Play button | reads `_findNextUserFixture()`; Play fires the fast-forward |
+| 📜 Match History | modal (separate from clubhouse views) | last 50 matches from `GameStorage.loadHistory()` |
+
+### 13.1 Top scorers / Top assists
+
+Two tables render below the league standings: **🥇 Top Scorers** and **🎯 Top Assists**. Each shows `# / Player / Club / G or A` for the top 10.
+
+Source: `_aggregateTopScorersAndAssists()` walks every league club's persistent `players[]` roster (see §13.2), summing each player's career `goals` / `assists`. For the user's club it pulls from `GameStorage.loadPlayerTeam()` instead, since that's where the user's roster edits + match increments land. Fresh saves (no rosters yet) fall back to per-match snapshot aggregation from match history.
+
+User's club rows are highlighted gold (same as the standings).
+
+### 13.2 League-wide attribution (persistent CPU rosters)
+
+Each league club gets a **persistent player roster** so scorers/assists accumulate across the whole season instead of only in matches the user played.
+
+- `LeagueGenerator.ensureRoster(club, nation)` — lazily generates ~18 position-balanced players via `Team.createPlayer`, names from the league's nation, quality biased by `club.budget`. No-op when a roster already exists. Called at onboarding for every non-user club, and as a safety net in `simulateRound` for older saves.
+- `LeagueGenerator.simulateMatch(home, away)` — replaces the old `simulateScore` in `simulateRound`. Generates a Poisson-sampled score (same as before) **plus** picks a scorer per goal (weighted by finishing/off-the-ball, biased toward FWD/AM positions) and a 62 %-chance assister (weighted by passing/creativity/vision, biased toward CAM/CM/W). Each pick increments the player's `goals` / `assists`.
+- **User's match path** — `_buildCpuOpponent()` passes the league club's persistent `players[]` into the `Team` constructor. The same player objects accumulate stats during the live match, then `_mergeMatchStatsIntoCareer()` folds the per-match `stats.goalsScored` / `stats.assistsGiven` into career `goals` / `assists` before `endMatch` saves the league.
+
+Result: a single coherent leaderboard whether goals came from a user-played match or a CPU-vs-CPU simulated round.
+
+### 13.3 Fixtures double round-robin + auto-heal
+
+`LeagueGenerator.generateFixtures(clubs)` produces a full double round-robin: `2(n-1)` rounds, each pair meets twice (home + away mirrored in the second leg). For 10 clubs → 18 rounds, 90 matches, each team gets 9 H + 9 A.
+
+Older saves that pre-date this produced only the first leg. `GameStorage.loadFixtures()` invokes `LeagueGenerator.backfillSecondLegIfMissing(rounds, league)` on every read — when the saved fixture list is exactly `n-1` rounds, it appends a mirror second leg with continued weekly Sat/Sun dates, then writes the upgraded list back so subsequent loads short-circuit.
+
+---
+
+## 14. Game logic notes
+
+### 14.1 Shot accounting
+
+All paths that produce a shot at goal increment `stats.playerShots` / `stats.cpuShots`:
+
+| Outcome | Counts as shot? | Counts as on-target? |
+|---|---|---|
+| Goal (open play, header, long shot, penalty, free kick, spectacular, one-on-one) | ✓ | ✓ |
+| Saved by keeper (open-play danger, headed shot, etc.) | ✓ | ✓ |
+| Wide / over the bar | ✓ | ✗ |
+| Hit the crossbar | ✓ | ✗ |
+| Tackle / interception / cleared corner (no shot taken) | ✗ | ✗ |
+
+Saves and headed-shot outcomes (saved or over) were previously missing from the team shot tally — fixed so the box-score row reflects all actual shot attempts.
+
+---
+
+## 15. Mobile UX
+
+A `@media (max-width: 640px)` block reshapes a few screens for touch:
+
+### 15.1 Clubhouse bottom app footer
+
+The desktop left rail is hidden on mobile. A fixed **bottom footer** appears at the bottom of `#clubhouseScreen` with two halves:
+
+- **Left** — `☰ Menu` button. Tapping slides up a bottom-sheet of menu items (Stadium / Squad / Tactics & XI / League / Fixtures / Play / History / Office). Sheet items mirror the desktop rail (same `data-clubhouse-action`), so the same handler wires both. Tap an item or the dark backdrop to close.
+- **Right** — Back / current-label / Forward nav pill, mirroring the desktop nav stack via duplicate IDs that `_refreshNavButtons()` keeps in sync.
+
+`.clubhouse-stage` gets bottom padding `56px + env(safe-area-inset-bottom)` so long views clear the footer.
+
+### 15.2 Match Management mobile fixes
+
+- `#managementScreen` becomes `height: auto; min-height: 100dvh; overflow: visible` so the document scrolls naturally to the **▶ Kick Off Match** / **← Resume Match** button at the bottom.
+- The formation pitch drops its `50vh` cap and uses `aspect-ratio: 3 / 4` with `min-height: 360px`. `overflow: visible` so player slots near the goal lines aren't clipped.
+- The tactic panel stays visible (with compact row/label sizing).
+- Substitution is via the tap-menu (§7.1) since HTML5 drag-and-drop doesn't fire on touch.
+
+### 15.3 Top bar + safe area
+
+The fixed top bar (`#topMenuBar`) sits at `top: env(safe-area-inset-top)` so on a notched iPhone it ducks below the notch rather than under it. Body padding-top is `calc(44px + env(safe-area-inset-top)) !important` so no later shorthand `padding: 0` rule can collapse the top clearance.
+
+### 15.4 Player card polish
+
+- **Floating OVR badge** — top-right of every formation-pitch slot, big enough to read at a glance during a live match (see §7.3).
+- **Floating morale badge** — top-left, mirroring the OVR badge layout (see §4.6).
+- **Thicker stamina bar** — 7 px (was 3 px) with bolder border + inset shadow.
+- **Primary position highlighted** — natural position wrapped in `.pos-primary` (gold/bold) inside the comma-separated position label.
+
+### 15.5 Vietnamese names
+
+The Vietnam entry in the player-name pool has a `middle` array and `middleProb: 0.75`. `Team.createPlayer` slots a middle name between the family name and given name per local convention — producing names like **Nguyễn Văn Minh** or **Đặng Ngọc Long** instead of just **Nguyễn Minh**.
+
+---
+
+## 16. Inspirations & sources
 
 Idioms / mechanics borrowed from real football management games:
 
