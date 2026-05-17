@@ -841,6 +841,16 @@
                 return Random.gaussianInt(25, 4, 17, 38);
             }
 
+            // Foot preference. Real-world distribution is roughly 75% right /
+            // 18% left / 7% two-footed. Used by scenes that need to stand the
+            // player on one side of the ball (e.g. free-kick positioning).
+            static randomFoot() {
+                const r = Math.random();
+                if (r < 0.75) return 'right';
+                if (r < 0.93) return 'left';
+                return 'both';
+            }
+
             // Position-aware height (cm) using a Normal distribution per role profile.
             // GKs / CBs / target STs trend tall; wide midfielders / wingers trend shorter.
             static randomHeight(position) {
@@ -920,19 +930,50 @@
                 return inst;
             }
 
-            constructor(teamName, excludedColor = null) {
+            constructor(teamName, excludedColor = null, restored = null) {
+                // Restore path — rehydrate from a snapshot produced by serialize().
+                // Crest SVG is regenerated from the seed (don't store ~10KB of markup).
+                if (restored) {
+                    this.teamName    = restored.teamName;
+                    this.jerseyColor = restored.jerseyColor;
+                    this.clubName    = restored.clubName;
+                    this.crestSeed   = restored.crestSeed;
+                    this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
+                    this.crestSVGSm  = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 44);
+                    this.players     = Array.isArray(restored.players) ? restored.players : [];
+                    this.startingXI  = [];
+                    this.bench       = [];
+                    this.onField     = [];
+                    return;
+                }
+
+                // Fresh-generation path
                 this.teamName = teamName;
                 const jerseyColors = ['#FF0000', '#0000FF', '#FFFF00', '#FF6600', '#FF00FF', '#00FFFF', '#FF4444'];
                 const available = excludedColor ? jerseyColors.filter(c => c !== excludedColor) : jerseyColors;
                 this.jerseyColor = available[Math.floor(Math.random() * available.length)];
-                const crestSeed = Math.floor(Math.random() * 99999);
-                this.clubName   = CrestGenerator.generateName(crestSeed);
-                this.crestSVG   = CrestGenerator.generateSVG(crestSeed, this.jerseyColor, 70);
-                this.crestSVGSm = CrestGenerator.generateSVG(crestSeed, this.jerseyColor, 44);
+                this.crestSeed   = Math.floor(Math.random() * 99999);
+                this.clubName    = CrestGenerator.generateName(this.crestSeed);
+                this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
+                this.crestSVGSm  = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 44);
                 this.players = this.generatePlayers();
                 this.startingXI = [];
                 this.bench = [];
                 this.onField = [];
+            }
+
+            // JSON-safe snapshot suitable for GameStorage. Saves only the
+            // canonical data — crest SVG is regenerated from the seed on load,
+            // and startingXI / bench / onField are rebuilt from `players` via
+            // setupSquad() so we don't duplicate player references.
+            serialize() {
+                return {
+                    teamName:    this.teamName,
+                    jerseyColor: this.jerseyColor,
+                    clubName:    this.clubName,
+                    crestSeed:   this.crestSeed,
+                    players:     this.players,
+                };
             }
 
             // Instance wrapper — the actual roster generation is in the static
@@ -971,6 +1012,7 @@
                     number: idx + 1,
                     age:    Team.randomAge(),
                     height: Team.randomHeight(position),    // cm
+                    foot:   Team.randomFoot(),              // 'right' | 'left' | 'both'
                     appearances: 0,
                     goals: 0,
                     assists: 0,
@@ -1019,7 +1061,7 @@
                         influence: 95, luck: 85,
                         overall: 93,
                         morale: 'top',   // talisman is always up for it
-                        age: 25, height: 178,
+                        age: 25, height: 178, foot: 'right',
                         naturalPosition: 'ST',
                         secondaryPositions: ['CF', 'CAM'],   // can drop into the hole
                         stats: { dribbles: 0, passes: 0, shots: 0, duelsWon: 0, minutesPlayed: 0, subbedOnMinute: null },
@@ -1099,6 +1141,148 @@
                     wSum  += weight;
                 }
                 return total / wSum;
+            }
+
+            // ─── Squad-level strength (CM 03/04-style aggregate) ─────────────
+            // CM 03/04 has no published "team strength" number, but every club is
+            // implicitly evaluated by summing the squad's Current Abilities, with
+            // the starting XI dominating and the bench / reserves discounted.
+            // This mirrors that idea — see README §3 (per-zone ratings already
+            // exist for the live XI; this is the *squad-wide* analogue).
+            //
+            // Returns:
+            //   { overall, attack, midfield, defense, breakdown, bestXI, bench }
+            //   — every number on a 0–100 scale.
+
+            // Position penalty for playing a player out of role:
+            //   1.00 natural · 0.88 secondary · 0.72 same family · 0.50 cross-family.
+            // Standalone helper (ZoneStrength.positionMult reads player.position;
+            // here we need to score arbitrary candidate roles without mutating).
+            static _rolePenalty(player, role) {
+                if (!player || !role) return 1.00;
+                if (player.naturalPosition === role) return 1.00;
+                if ((player.secondaryPositions || []).includes(role)) return 0.88;
+                const fam = (typeof ZoneStrength !== 'undefined') ? ZoneStrength.POSITION_FAMILY : null;
+                if (fam && fam[player.naturalPosition] && fam[player.naturalPosition] === fam[role]) return 0.72;
+                return 0.50;
+            }
+
+            // Greedy best-XI selection. Walks the formation's SLOT_POSITIONS in
+            // order; for each slot, picks the highest-rated unused player at that
+            // role. Returns an array of 11 picks (or fewer if the squad is short).
+            static _pickBestXI(squad, formation) {
+                const slots = Team.SLOT_POSITIONS[formation] || Team.SLOT_POSITIONS['442'];
+                const pool  = (squad || []).slice();
+                const picks = [];
+                for (const role of slots) {
+                    let best = null, bestIdx = -1, bestRating = -Infinity;
+                    for (let i = 0; i < pool.length; i++) {
+                        const p = pool[i];
+                        const r = Team.computeOverall(role, p) * Team._rolePenalty(p, role);
+                        if (r > bestRating) { bestRating = r; best = p; bestIdx = i; }
+                    }
+                    if (best) {
+                        picks.push({ player: best, role, rating: bestRating });
+                        pool.splice(bestIdx, 1);
+                    }
+                }
+                return { picks, remaining: pool };
+            }
+
+            // Squad strength. Computes:
+            //   1. Best XI for the formation + their per-zone (attack/mid/defense) avg
+            //   2. Bench-depth from the next 7 best
+            //   3. Position-coverage check (need ≥ 2 of GK / CB / CM / ST)
+            //   4. Formation bonus
+            //   5. Weighted aggregate → overall
+            static computeSquadStrength(squad, formation = '442') {
+                const safe = Array.isArray(squad) ? squad : [];
+                if (safe.length === 0) {
+                    return { overall: 50, attack: 50, midfield: 50, defense: 50,
+                             breakdown: { bestXI: 50, benchDepth: 50, coverage: 0, formation: 1 },
+                             bestXI: [], bench: [] };
+                }
+
+                // 1) Best XI for the requested formation
+                const { picks, remaining } = Team._pickBestXI(safe, formation);
+                const bestXIAvg = picks.length
+                    ? picks.reduce((s, x) => s + x.rating, 0) / picks.length
+                    : 50;
+
+                // 2) Per-zone averages bucketed by the slot's role (not natural position)
+                const ATTACK_POS  = (typeof ZoneStrength !== 'undefined') ? ZoneStrength.ATTACK_POS  : ['ST','CF','LW','RW','CAM'];
+                const MID_POS     = (typeof ZoneStrength !== 'undefined') ? ZoneStrength.MID_POS     : ['CM','CDM','LM','RM'];
+                const DEFENSE_POS = (typeof ZoneStrength !== 'undefined') ? ZoneStrength.DEFENSE_POS : ['CB','LB','RB','LWB','RWB'];
+                const fbonus = (typeof ZoneStrength !== 'undefined') ? ZoneStrength.formationBonus(formation)
+                                                                    : { attack: 1, midfield: 1, defense: 1 };
+
+                let atkSum = 0, atkN = 0, midSum = 0, midN = 0, defSum = 0, defN = 0;
+                picks.forEach(x => {
+                    if (ATTACK_POS.includes(x.role))       { atkSum += x.rating; atkN++; }
+                    else if (MID_POS.includes(x.role))     { midSum += x.rating; midN++; }
+                    else if (DEFENSE_POS.includes(x.role)) { defSum += x.rating; defN++; }
+                    // GK contributes to defense too (covers the formation's last line)
+                    if (x.role === 'GK') { defSum += x.rating; defN++; }
+                });
+                const attack   = (atkN ? atkSum / atkN : bestXIAvg) * fbonus.attack;
+                const midfield = (midN ? midSum / midN : bestXIAvg) * fbonus.midfield;
+                const defense  = (defN ? defSum / defN : bestXIAvg) * fbonus.defense;
+
+                // 3) Bench depth — next 7 best players by their best-role rating
+                const rankedRest = remaining
+                    .map(p => {
+                        let best = 0;
+                        const allRoles = ['GK','CB','CDM','LB','RB','LWB','RWB','CM','CAM','LM','RM','LW','RW','ST','CF'];
+                        for (const r of allRoles) {
+                            const v = Team.computeOverall(r, p) * Team._rolePenalty(p, r);
+                            if (v > best) best = v;
+                        }
+                        return { player: p, rating: best };
+                    })
+                    .sort((a, b) => b.rating - a.rating);
+                const bench = rankedRest.slice(0, 7);
+                const benchDepth = bench.length
+                    ? bench.reduce((s, x) => s + x.rating, 0) / bench.length
+                    : Math.max(40, bestXIAvg - 20);   // shallow squads still get *something*
+
+                // 4) Position coverage — need ≥ 2 players who can play each critical role
+                const criticalRoles = ['GK', 'CB', 'CM', 'ST'];
+                let coverageScore = 0;
+                criticalRoles.forEach(role => {
+                    const n = safe.filter(p =>
+                        p.naturalPosition === role || (p.secondaryPositions || []).includes(role)
+                    ).length;
+                    coverageScore += Math.min(1, n / 2);
+                });
+                const coverage = coverageScore / criticalRoles.length;   // 0..1
+
+                // 5) Formation bonus (averaged across the three zones)
+                const formationFactor = (fbonus.attack + fbonus.midfield + fbonus.defense) / 3;
+
+                // 6) Aggregate — weighted blend, then apply coverage as a 0.85–1.00 multiplier
+                let overall = (
+                    0.60 * bestXIAvg
+                  + 0.20 * benchDepth
+                  + 0.10 * ((attack + midfield + defense) / 3)
+                  + 0.10 * formationFactor * 100        // bonus scaled into 0–100 range
+                );
+                overall *= (0.85 + 0.15 * coverage);
+                overall = Math.max(0, Math.min(100, overall));
+
+                return {
+                    overall:  Math.round(overall),
+                    attack:   Math.round(Math.max(0, Math.min(100, attack))),
+                    midfield: Math.round(Math.max(0, Math.min(100, midfield))),
+                    defense:  Math.round(Math.max(0, Math.min(100, defense))),
+                    breakdown: {
+                        bestXI:     Math.round(bestXIAvg),
+                        benchDepth: Math.round(benchDepth),
+                        coverage:   Math.round(coverage * 100) / 100,
+                        formation:  Math.round(formationFactor * 100) / 100,
+                    },
+                    bestXI: picks,
+                    bench,
+                };
             }
 
             setupSquad(formation) {
@@ -1323,14 +1507,16 @@
                 this.isRunning = false;
                 this.isPaused = false;
                 this.stats = {
-                    playerShots: 0,
-                    cpuShots: 0,
-                    playerTackles: 0,
-                    cpuTackles: 0,
-                    playerPasses: 0,
-                    cpuPasses: 0,
-                    playerPossession: 50,
-                    cpuPossession: 50
+                    playerShots: 0, cpuShots: 0,
+                    playerShotsOnTarget: 0, cpuShotsOnTarget: 0,
+                    playerTackles: 0, cpuTackles: 0,
+                    playerPasses: 0, cpuPasses: 0,
+                    playerPassesCompleted: 0, cpuPassesCompleted: 0,
+                    playerCorners: 0, cpuCorners: 0,
+                    playerFouls: 0, cpuFouls: 0,
+                    playerOffsides: 0, cpuOffsides: 0,
+                    playerFreeKicks: 0, cpuFreeKicks: 0,
+                    playerPossession: 50, cpuPossession: 50,
                 };
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn = null;
@@ -1339,6 +1525,12 @@
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral'; // kept for legacy compat
                 this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
+                // Restore previously-saved tactics + formation if a career is in progress
+                const savedTactics = (typeof GameStorage !== 'undefined') ? GameStorage.loadTactics() : null;
+                if (savedTactics) {
+                    if (savedTactics.tactics) this.tactics = { ...this.tactics, ...savedTactics.tactics };
+                    if (savedTactics.formation) this.playerFormation = savedTactics.formation;
+                }
                 this.momentum = 50; // 0=CPU dominates, 100=player dominates
                 this._attackPhase = null; // null | 'buildup' | 'progression' | 'danger'
                 this._attackTeam  = null; // 'player' | 'cpu'
@@ -1351,6 +1543,15 @@
                 this._cpuLastFormationChangeMinute = 0;  // CPU AI cooldown tracker
                 this.audio        = (typeof AudioFx !== 'undefined') ? new AudioFx() : null;
                 this.dramatic     = (typeof DramaticOverlay !== 'undefined') ? new DramaticOverlay(this) : null;
+                // Apply saved settings (mute / volume / match speed) before any audio plays
+                if (typeof GameStorage !== 'undefined') {
+                    const s = GameStorage.loadSettings();
+                    if (this.audio) {
+                        this.audio.setMuted(!!s.muted);
+                        if (typeof s.volume === 'number') this.audio.setVolume(s.volume);
+                    }
+                    if (s.speed) this.matchSpeed = s.speed;
+                }
                 this.debugMode    = false;   // toggled by triple-clicking the match clock
                 this._timerClickCount = 0;
                 this._timerClickTimer = null;
@@ -1361,7 +1562,15 @@
                 this.animationEngine = new AnimationEngine(this.pitchRenderer);
                 this.matchFlow = null;
                 console.log('Initializing pre-match team...');
-                this.playerTeam = new Team('You');
+                // Restore the player team from storage if a career snapshot exists;
+                // otherwise generate a fresh "You" squad as before.
+                const savedTeam = (typeof GameStorage !== 'undefined') ? GameStorage.loadPlayerTeam() : null;
+                if (savedTeam && Array.isArray(savedTeam.players) && savedTeam.players.length) {
+                    console.log('Restoring saved player team:', savedTeam.clubName);
+                    this.playerTeam = new Team('You', null, savedTeam);
+                } else {
+                    this.playerTeam = new Team('You');
+                }
                 this.playerTeam.setupSquad(this.playerFormation);
                 console.log('Setting up event listeners...');
                 this.setupEventListeners();
@@ -1399,16 +1608,19 @@
                     // trigger for AudioContext init on some browsers.
                     const muteBtn = document.getElementById('muteBtn');
                     if (muteBtn) {
-                        const savedMuted = localStorage.getItem('footballSimMuted') === '1';
-                        if (savedMuted && this.audio) this.audio.setMuted(true);
-                        muteBtn.textContent = savedMuted ? '🔇' : '🔊';
-                        muteBtn.classList.toggle('muted', savedMuted);
+                        // Settings (incl. muted) were already applied in the constructor —
+                        // here we just reflect that state in the button + wire the click.
+                        const startMuted = !!this.audio?.muted;
+                        muteBtn.textContent = startMuted ? '🔇' : '🔊';
+                        muteBtn.classList.toggle('muted', startMuted);
                         muteBtn.addEventListener('click', () => {
                             if (!this.audio) return;
                             this.audio.setMuted(!this.audio.muted);
                             muteBtn.textContent = this.audio.muted ? '🔇' : '🔊';
                             muteBtn.classList.toggle('muted', this.audio.muted);
-                            localStorage.setItem('footballSimMuted', this.audio.muted ? '1' : '0');
+                            if (typeof GameStorage !== 'undefined') {
+                                GameStorage.saveSettings({ muted: this.audio.muted });
+                            }
                             if (!this.audio.muted) this.audio.click();
                         });
                     }
@@ -1434,11 +1646,1161 @@
                         btn.addEventListener('click', () => this.setMatchSpeed(btn.dataset.speed));
                     });
 
+                    // Top floating menu bar + hamburger dropdown
+                    this.setupTopMenu();
+                    // Floating bottom nav (back / forward) + nav stack init
+                    this._initNavStack();
+                    // Re-parent the management screen's inner content into the
+                    // clubhouse "Tactics & XI" pane so the old full-screen
+                    // editor now lives inline in the clubhouse right pane.
+                    // All IDs are preserved, so existing renderManagementPanel
+                    // / event handlers keep working without modification.
+                    this._relocateManagementContent();
+
+                    // First-run onboarding: prompt for a manager name if none saved.
+                    // If a manager + league already exist, skip onboarding and land
+                    // directly on the Clubhouse.
+                    this.setupOnboarding();
+                    if (typeof GameStorage !== 'undefined') {
+                        const mgr = GameStorage.loadManager();
+                        if (!mgr || !mgr.name) {
+                            this._showOnboarding();
+                        } else {
+                            this._refreshManagerLabel();
+                            if (mgr.clubName) {
+                                // Defer until the management panel render is finished so
+                                // switchScreen finds the clubhouse partial in the DOM.
+                                setTimeout(() => this._enterClubhouse(), 0);
+                            }
+                        }
+                    }
+
                     // Render management panel now that team is initialized
                     this.renderManagementPanel();
                 } catch (error) {
                     console.error('Error setting up event listeners:', error);
                 }
+            }
+
+            // ─── Top floating menu bar (hamburger dropdown) ──────────────────
+            setupTopMenu() {
+                const hamb = document.getElementById('hamburgerBtn');
+                const drop = document.getElementById('topMenuDropdown');
+                if (!hamb || !drop) return;
+
+                const setOpen = (open) => {
+                    drop.style.display = open ? 'block' : 'none';
+                    hamb.setAttribute('aria-expanded', String(open));
+                    if (open) this._refreshTopMenuState();
+                };
+                const isOpen = () => drop.style.display !== 'none';
+
+                hamb.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    setOpen(!isOpen());
+                });
+
+                // Click outside → close. Use capture so it runs before item clicks
+                // close the menu prematurely.
+                document.addEventListener('click', (e) => {
+                    if (!isOpen()) return;
+                    if (drop.contains(e.target) || e.target === hamb) return;
+                    setOpen(false);
+                });
+
+                // Esc → close
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && isOpen()) setOpen(false);
+                });
+
+                // Menu item actions
+                drop.querySelectorAll('[data-menu-action]').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const action = btn.dataset.menuAction;
+                        const oneShot = action === 'show-history' || action === 'reset-career';
+                        this._handleMenuAction(action);
+                        this._refreshTopMenuState();
+                        if (oneShot) setOpen(false);
+                    });
+                });
+
+                // Initial labels (mute / speed / debug)
+                this._refreshTopMenuState();
+            }
+
+            // Refreshes the right-aligned "On / Fast / Off" labels in the dropdown
+            _refreshTopMenuState() {
+                const sound = document.getElementById('tmSoundState');
+                if (sound) sound.textContent = (this.audio?.muted) ? 'Off' : 'On';
+                const speed = document.getElementById('tmSpeedState');
+                if (speed && this.matchSpeed) {
+                    speed.textContent = this.matchSpeed.charAt(0).toUpperCase() + this.matchSpeed.slice(1);
+                }
+                const dbg = document.getElementById('tmDebugState');
+                if (dbg) dbg.textContent = this.debugMode ? 'On' : 'Off';
+            }
+
+            _handleMenuAction(action) {
+                switch (action) {
+                    case 'toggle-sound': {
+                        if (!this.audio) return;
+                        this.audio.setMuted(!this.audio.muted);
+                        if (typeof GameStorage !== 'undefined') {
+                            GameStorage.saveSettings({ muted: this.audio.muted });
+                        }
+                        // Keep the existing in-match mute button in sync if it's mounted
+                        const btn = document.getElementById('muteBtn');
+                        if (btn) {
+                            btn.textContent = this.audio.muted ? '🔇' : '🔊';
+                            btn.classList.toggle('muted', this.audio.muted);
+                        }
+                        if (!this.audio.muted) this.audio.click();
+                        break;
+                    }
+                    case 'cycle-speed': {
+                        const order = ['fast', 'normal', 'slow'];
+                        const idx = order.indexOf(this.matchSpeed);
+                        const next = order[(idx + 1) % order.length];
+                        this.setMatchSpeed(next);
+                        break;
+                    }
+                    case 'toggle-debug': {
+                        this.debugMode = !this.debugMode;
+                        // Reuse the existing debug-clock affordance so the on-pitch
+                        // overlay reacts the same way as a triple-click on the clock.
+                        const timerEl = document.getElementById('timer');
+                        if (timerEl) timerEl.classList.toggle('debug', this.debugMode);
+                        const dbgOverlay = document.querySelector('.debug-overlay');
+                        if (dbgOverlay) dbgOverlay.style.display = this.debugMode ? 'block' : 'none';
+                        break;
+                    }
+                    case 'show-history': {
+                        this._showHistoryModal();
+                        break;
+                    }
+                    case 'reset-career': {
+                        const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                        const who = mgr?.name ? ` for ${mgr.name}` : '';
+                        const ok = window.confirm(
+                            `Reset career${who}?\n\n` +
+                            'This will PERMANENTLY ERASE all historical data — your ' +
+                            'manager profile, saved squad, tactics, and match history. ' +
+                            'Settings (sound / speed) are kept.\n\n' +
+                            'You will be returned to the welcome screen to create a new manager. ' +
+                            'Are you sure you want to proceed?'
+                        );
+                        if (ok && typeof this.resetCareer === 'function') {
+                            this.resetCareer();
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Match-history modal — two-state. List view (clickable rows) and
+            // detail view (full match report). Built ad-hoc on each open so it
+            // always reflects the latest persisted data.
+            _showHistoryModal() {
+                const history = (typeof GameStorage !== 'undefined') ? GameStorage.loadHistory() : [];
+                let modal = document.getElementById('historyModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'historyModal';
+                    modal.className = 'modal-overlay';
+                    document.body.appendChild(modal);
+                }
+                this._renderHistoryList(modal, history);
+                modal.classList.add('active');
+                modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('active'); };
+            }
+
+            _renderHistoryList(modal, history) {
+                const body = history.length
+                    ? history.slice().reverse().map((m, revIdx) => {
+                        const realIdx = history.length - 1 - revIdx;
+                        const win = m.playerScore > m.cpuScore ? 'W'
+                                  : m.playerScore < m.cpuScore ? 'L' : 'D';
+                        let dateStr = '';
+                        try { dateStr = new Date(m.date).toLocaleString(); } catch (e) { dateStr = m.date || ''; }
+                        const scorers = (m.goals || [])
+                            .map(g => `${g.scorer || '?'} ${g.minute}'`)
+                            .join(', ');
+                        return `<div class="tm-hist-row tm-hist-clickable" data-history-idx="${realIdx}" role="button" tabindex="0">
+                            <span class="tm-result ${win}">${win}</span>
+                            <span class="tm-score">${m.playerScore}–${m.cpuScore}</span>
+                            <span class="tm-opponent">${m.cpuTeam || 'Opponent'}</span>
+                            <span class="tm-date">${dateStr}</span>
+                            ${scorers ? `<div class="tm-scorers">⚽ ${scorers}</div>` : ''}
+                        </div>`;
+                    }).join('')
+                    : `<div class="tm-hist-empty">No matches played yet — finish a match to log it here.</div>`;
+
+                modal.innerHTML = `
+                    <div class="modal-card">
+                        <div class="modal-head">
+                            <span>Match History${history.length ? ` (${history.length})` : ''}</span>
+                            <button class="modal-close" aria-label="Close">×</button>
+                        </div>
+                        <div class="modal-body">${body}</div>
+                    </div>`;
+                modal.querySelector('.modal-close').addEventListener('click', () => modal.classList.remove('active'));
+                modal.querySelectorAll('.tm-hist-clickable').forEach(row => {
+                    const open = () => {
+                        const idx = parseInt(row.dataset.historyIdx, 10);
+                        this._renderHistoryDetail(modal, history, idx);
+                    };
+                    row.addEventListener('click', open);
+                    row.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+                    });
+                });
+            }
+
+            _renderHistoryDetail(modal, history, idx) {
+                const m = history[idx];
+                if (!m) return;
+                const win = m.playerScore > m.cpuScore ? 'W'
+                          : m.playerScore < m.cpuScore ? 'L' : 'D';
+                const dateStr = (() => { try { return new Date(m.date).toLocaleString(); } catch { return m.date || ''; } })();
+                const ts = m.teamStats || {};
+
+                // Helper: 0-safe percentage
+                const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
+
+                // Per-team match stats table
+                const statRow = (label, p, c, suffix = '') => `
+                    <div class="tm-stat-row">
+                        <span class="tm-stat-num">${p ?? 0}${suffix}</span>
+                        <span class="tm-stat-label">${label}</span>
+                        <span class="tm-stat-num">${c ?? 0}${suffix}</span>
+                    </div>`;
+                const teamStatsHtml = `
+                    <div class="tm-stat-table">
+                        <div class="tm-stat-head">
+                            <span>${m.playerTeam || 'You'}</span>
+                            <span>Match stats</span>
+                            <span>${m.cpuTeam || 'CPU'}</span>
+                        </div>
+                        ${statRow('Possession', ts.playerPossession ?? 50, ts.cpuPossession ?? 50, '%')}
+                        ${statRow('Shots', ts.playerShots, ts.cpuShots)}
+                        ${statRow('Shots on target', ts.playerShotsOnTarget, ts.cpuShotsOnTarget)}
+                        ${statRow('Passes', ts.playerPasses, ts.cpuPasses)}
+                        ${statRow('Pass %', pct(ts.playerPassesCompleted, ts.playerPasses), pct(ts.cpuPassesCompleted, ts.cpuPasses), '%')}
+                        ${statRow('Tackles', ts.playerTackles, ts.cpuTackles)}
+                        ${statRow('Corners', ts.playerCorners, ts.cpuCorners)}
+                        ${statRow('Fouls', ts.playerFouls, ts.cpuFouls)}
+                        ${statRow('Offsides', ts.playerOffsides, ts.cpuOffsides)}
+                        ${statRow('Free kicks', ts.playerFreeKicks, ts.cpuFreeKicks)}
+                    </div>`;
+
+                // Goalscorers timeline
+                const goalsHtml = (m.goals || []).length
+                    ? `<div class="tm-section-head">Goalscorers</div>
+                       <div class="tm-goal-list">
+                           ${m.goals.map(g => {
+                               const teamLabel = g.team === 'player' ? (m.playerTeam || 'You') : (m.cpuTeam || 'CPU');
+                               const assist = g.assister ? ` <span class="tm-assister">(assist: ${g.assister})</span>` : '';
+                               return `<div class="tm-goal">
+                                   <span class="tm-minute">${g.minute || '?'}'</span>
+                                   <span class="tm-team-tag tm-team-${g.team}">${teamLabel}</span>
+                                   <span class="tm-scorer">⚽ ${g.scorer || '?'}${assist}</span>
+                               </div>`;
+                           }).join('')}
+                       </div>`
+                    : '';
+
+                // Cards
+                const allCards = [
+                    ...(m.cards?.player || []).map(c => ({ ...c, team: 'player' })),
+                    ...(m.cards?.cpu    || []).map(c => ({ ...c, team: 'cpu' })),
+                ].sort((a, b) => (a.time || 0) - (b.time || 0));
+                const cardsHtml = allCards.length
+                    ? `<div class="tm-section-head">Cards</div>
+                       <div class="tm-card-list">
+                           ${allCards.map(c => {
+                               const teamLabel = c.team === 'player' ? (m.playerTeam || 'You') : (m.cpuTeam || 'CPU');
+                               const icon = c.type === 'red' ? '🟥' : '🟨';
+                               return `<div class="tm-card-row">
+                                   <span class="tm-minute">${c.time}'</span>
+                                   <span class="tm-team-tag tm-team-${c.team}">${teamLabel}</span>
+                                   <span>${icon} ${c.player}</span>
+                               </div>`;
+                           }).join('')}
+                       </div>`
+                    : '';
+
+                // Per-player line-ups (top players by rating)
+                const lineupHtml = (label, snap) => {
+                    if (!snap || !snap.lineup?.length) return '';
+                    return `<div class="tm-lineup">
+                        <div class="tm-lineup-head">${label}</div>
+                        <div class="tm-lineup-row tm-lineup-head-row">
+                            <span>#</span><span>Player</span><span title="Position">Pos</span>
+                            <span title="Minutes">Min</span>
+                            <span title="Goals">G</span><span title="Assists">A</span>
+                            <span title="Shots (on target)">Sh</span>
+                            <span title="Pass %">P%</span>
+                            <span title="Tackles">T</span>
+                            <span title="Cards">C</span>
+                            <span title="Rating 1-10">Rating</span>
+                        </div>
+                        ${snap.lineup.map(pl => {
+                            const ratingClass = pl.rating >= 8 ? 'r-great' : pl.rating >= 7 ? 'r-good' : pl.rating >= 6 ? 'r-ok' : 'r-poor';
+                            const passPct = pl.passes > 0 ? Math.round((pl.passesCompleted / pl.passes) * 100) : 0;
+                            const cards = (pl.redCards ? '🟥'.repeat(pl.redCards) : '') + (pl.yellowCards ? '🟨'.repeat(pl.yellowCards) : '') || '·';
+                            return `<div class="tm-lineup-row">
+                                <span>${pl.number ?? '·'}</span>
+                                <span class="tm-pl-name">${pl.name}</span>
+                                <span class="tm-pl-pos">${pl.position}</span>
+                                <span>${pl.minutes}'</span>
+                                <span>${pl.goals || '·'}</span>
+                                <span>${pl.assists || '·'}</span>
+                                <span>${pl.shots}${pl.shotsOnTarget ? ` (${pl.shotsOnTarget})` : ''}</span>
+                                <span>${passPct ? passPct + '%' : '·'}</span>
+                                <span>${pl.tackles || '·'}</span>
+                                <span class="tm-pl-cards">${cards}</span>
+                                <span class="tm-pl-rating ${ratingClass}">${pl.rating ? pl.rating.toFixed(1) : '–'}</span>
+                            </div>`;
+                        }).join('')}
+                    </div>`;
+                };
+
+                modal.innerHTML = `
+                    <div class="modal-card modal-card-wide">
+                        <div class="modal-head">
+                            <button class="tm-back-btn" aria-label="Back to list">← Back</button>
+                            <span>Match Report</span>
+                            <button class="modal-close" aria-label="Close">×</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="tm-match-head">
+                                <div class="tm-match-team">${m.playerTeam || 'You'}</div>
+                                <div class="tm-match-score">
+                                    <span class="tm-result-big ${win}">${win}</span>
+                                    <span>${m.playerScore} – ${m.cpuScore}</span>
+                                </div>
+                                <div class="tm-match-team">${m.cpuTeam || 'CPU'}</div>
+                            </div>
+                            <div class="tm-match-sub">${m.playerFormation || ''} vs ${m.cpuFormation || ''} · ${dateStr}</div>
+                            ${goalsHtml}
+                            ${teamStatsHtml}
+                            ${cardsHtml}
+                            ${lineupHtml(m.playerTeam || 'You', m.playerLineup)}
+                            ${lineupHtml(m.cpuTeam || 'CPU',    m.cpuLineup)}
+                        </div>
+                    </div>`;
+                modal.querySelector('.modal-close').addEventListener('click', () => modal.classList.remove('active'));
+                modal.querySelector('.tm-back-btn').addEventListener('click', () => this._renderHistoryList(modal, history));
+            }
+
+            // ─── First-run onboarding — 4-step wizard ────────────────────────
+            // Step 1: manager name · 2: nation · 3: city + map · 4: league.
+            // Listeners wired ONCE here so re-showing the overlay (e.g. after
+            // a reset) doesn't stack handlers.
+            setupOnboarding() {
+                const overlay = document.getElementById('onboardingOverlay');
+                if (!overlay) return;
+
+                this._onbState = { name: '', nation: null, city: null, league: null };
+
+                // Step 1 — name
+                const nameInput = document.getElementById('onboardingNameInput');
+                const nameNext  = document.getElementById('onboardingNextBtn');
+                if (nameInput && nameNext) {
+                    nameInput.addEventListener('input', () => {
+                        nameNext.disabled = !nameInput.value.trim();
+                    });
+                    nameInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !nameNext.disabled) nameNext.click();
+                    });
+                    nameNext.addEventListener('click', () => {
+                        this._onbState.name = nameInput.value.trim();
+                        if (!this._onbState.name) return;
+                        this._renderNationStep();
+                        this._setOnbStep('nation');
+                    });
+                }
+
+                // Step 2 — nation
+                const nationNext = document.getElementById('nationNextBtn');
+                if (nationNext) {
+                    nationNext.addEventListener('click', () => {
+                        if (!this._onbState.nation) return;
+                        this._renderCityStep();
+                        this._setOnbStep('city');
+                    });
+                }
+
+                // Step 3 — city
+                const cityNext = document.getElementById('cityNextBtn');
+                if (cityNext) {
+                    cityNext.addEventListener('click', () => {
+                        if (!this._onbState.nation || !this._onbState.city) return;
+                        // Generate the league using the nation + chosen city
+                        this._onbState.league = (typeof LeagueGenerator !== 'undefined')
+                            ? LeagueGenerator.generateLeague(this._onbState.nation, this._onbState.city.name)
+                            : [];
+                        this._renderLeagueStep();
+                        this._setOnbStep('league');
+                    });
+                }
+
+                // Step 4 — confirm
+                const leagueConfirm = document.getElementById('leagueConfirmBtn');
+                if (leagueConfirm) {
+                    leagueConfirm.addEventListener('click', () => this._completeOnboarding());
+                }
+
+                // Back buttons (data-onb-back="<step>")
+                overlay.querySelectorAll('[data-onb-back]').forEach(btn => {
+                    btn.addEventListener('click', () => this._setOnbStep(btn.dataset.onbBack));
+                });
+            }
+
+            _setOnbStep(step) {
+                const overlay = document.getElementById('onboardingOverlay');
+                if (!overlay) return;
+                overlay.querySelectorAll('.onboarding-step').forEach(el => {
+                    el.classList.toggle('active', el.dataset.step === step);
+                });
+            }
+
+            _showOnboarding() {
+                const overlay = document.getElementById('onboardingOverlay');
+                if (!overlay) return;
+                // Reset wizard to step 1 with a clean slate
+                this._onbState = { name: '', nation: null, city: null, league: null };
+                const nameInput = document.getElementById('onboardingNameInput');
+                const nameNext  = document.getElementById('onboardingNextBtn');
+                if (nameInput) {
+                    nameInput.value = '';
+                    setTimeout(() => nameInput.focus(), 60);
+                }
+                if (nameNext) nameNext.disabled = true;
+                this._setOnbStep('name');
+                overlay.classList.add('active');
+                overlay.setAttribute('aria-hidden', 'false');
+                // Close the hamburger if open
+                const drop = document.getElementById('topMenuDropdown');
+                const hamb = document.getElementById('hamburgerBtn');
+                if (drop) drop.style.display = 'none';
+                if (hamb) hamb.setAttribute('aria-expanded', 'false');
+            }
+
+            // Step 2 — render the 11-nation grid
+            _renderNationStep() {
+                const grid = document.getElementById('nationGrid');
+                const next = document.getElementById('nationNextBtn');
+                if (!grid || typeof SEA_NATIONS === 'undefined') return;
+                grid.innerHTML = SEA_NATIONS.map(n => `
+                    <button class="nation-btn" data-nation-code="${n.code}">
+                        <span class="nation-flag">${n.flag}</span>
+                        <span class="nation-name">${n.name}</span>
+                    </button>
+                `).join('');
+                grid.querySelectorAll('.nation-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const code = btn.dataset.nationCode;
+                        this._onbState.nation = SEA_NATIONS.find(n => n.code === code);
+                        this._onbState.city = null;
+                        grid.querySelectorAll('.nation-btn').forEach(b => b.classList.toggle('selected', b === btn));
+                        if (next) next.disabled = false;
+                    });
+                });
+                if (next) next.disabled = !this._onbState.nation;
+                // Pre-select if we're stepping back to this view
+                if (this._onbState.nation) {
+                    const sel = grid.querySelector(`[data-nation-code="${this._onbState.nation.code}"]`);
+                    if (sel) sel.classList.add('selected');
+                }
+            }
+
+            // Step 3 — city list + interactive map
+            _renderCityStep() {
+                const nation = this._onbState.nation;
+                if (!nation) return;
+                const title = document.getElementById('cityStepTitle');
+                if (title) title.textContent = `Pick your home city — ${nation.flag} ${nation.name}`;
+
+                const list = document.getElementById('cityList');
+                const next = document.getElementById('cityNextBtn');
+                const map  = document.getElementById('countryMap');
+                if (!list || !map || !next) return;
+
+                // City list
+                list.innerHTML = nation.cities.map(c => `
+                    <button class="city-item" data-city-name="${c.name}">${c.name}</button>
+                `).join('');
+
+                // Map SVG: country outline + city dots
+                map.innerHTML = `
+                    <polygon class="map-outline" points="${nation.outline}"/>
+                    ${nation.cities.map(c => `
+                        <g class="map-city" data-city-name="${c.name}" tabindex="0">
+                            <circle class="map-dot" cx="${c.x}" cy="${c.y}" r="1.4"/>
+                            <text class="map-label" x="${c.x + 2}" y="${c.y + 1}">${c.name}</text>
+                        </g>
+                    `).join('')}
+                `;
+
+                const selectCity = (name) => {
+                    const city = nation.cities.find(c => c.name === name);
+                    if (!city) return;
+                    this._onbState.city = city;
+                    list.querySelectorAll('.city-item').forEach(el =>
+                        el.classList.toggle('selected', el.dataset.cityName === name));
+                    map.querySelectorAll('.map-city').forEach(el =>
+                        el.classList.toggle('selected', el.dataset.cityName === name));
+                    map.querySelectorAll('.map-city .map-dot').forEach(el => {
+                        const parent = el.parentNode;
+                        el.setAttribute('r', parent.classList.contains('selected') ? '2.2' : '1.4');
+                    });
+                    next.disabled = false;
+                };
+                list.querySelectorAll('.city-item').forEach(el => {
+                    el.addEventListener('click', () => selectCity(el.dataset.cityName));
+                });
+                map.querySelectorAll('.map-city').forEach(el => {
+                    el.addEventListener('click', () => selectCity(el.dataset.cityName));
+                    el.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            selectCity(el.dataset.cityName);
+                        }
+                    });
+                });
+
+                next.disabled = !this._onbState.city;
+                if (this._onbState.city) selectCity(this._onbState.city.name);
+            }
+
+            // Step 4 — preview league table, awaiting confirm
+            _renderLeagueStep() {
+                const wrap = document.getElementById('leaguePreview');
+                const intro = document.getElementById('leagueIntro');
+                if (!wrap) return;
+                const clubs = this._onbState.league || [];
+                if (intro && this._onbState.nation) {
+                    intro.textContent = `Here are the 10 ${this._onbState.nation.name} clubs you'll be competing with this season. Yours is highlighted.`;
+                }
+                const ordered = (typeof LeagueGenerator !== 'undefined')
+                    ? LeagueGenerator.sortTable(clubs)
+                    : clubs.slice();
+                wrap.innerHTML = `
+                    <div class="league-row header">
+                        <span class="lp-num">#</span>
+                        <span></span>
+                        <span class="lp-name">Club</span>
+                        <span class="lp-num">P</span>
+                        <span class="lp-num">W</span>
+                        <span class="lp-num">D</span>
+                        <span class="lp-num">L</span>
+                        <span class="lp-num">GF:GA</span>
+                        <span class="lp-num">Pts</span>
+                    </div>
+                    ${ordered.map((c, i) => `
+                        <div class="league-row ${c.isUserClub ? 'user-club' : ''}">
+                            <span class="lp-num">${i + 1}</span>
+                            <span class="lp-crest" style="background:${c.jerseyColor};"></span>
+                            <span class="lp-name">${c.clubName}</span>
+                            <span class="lp-num">${c.played}</span>
+                            <span class="lp-num">${c.wins}</span>
+                            <span class="lp-num">${c.draws}</span>
+                            <span class="lp-num">${c.losses}</span>
+                            <span class="lp-num">${c.goalsFor}:${c.goalsAgainst}</span>
+                            <span class="lp-num">${c.points}</span>
+                        </div>
+                    `).join('')}
+                `;
+            }
+
+            _completeOnboarding() {
+                const { name, nation, city, league } = this._onbState || {};
+                if (!name || !nation || !city) return;
+                const userClub = (league || []).find(c => c.isUserClub) || null;
+
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.saveManager({
+                        name,
+                        nation:   nation.code,
+                        nationName: nation.name,
+                        nationFlag: nation.flag,
+                        city:     city.name,
+                        clubName: userClub?.clubName || `${city.name} FC`,
+                        createdAt: new Date().toISOString(),
+                    });
+                    if (league) GameStorage.saveLeague(league);
+                    // Generate the round-robin fixture list once the league is set
+                    if (league && typeof LeagueGenerator !== 'undefined') {
+                        const fixtures = LeagueGenerator.generateFixtures(league);
+                        GameStorage.saveFixtures(fixtures);
+                    }
+                }
+
+                // Adopt the new club's identity for the player team (kit + crest)
+                if (this.playerTeam && userClub) {
+                    this.playerTeam.clubName    = userClub.clubName;
+                    this.playerTeam.jerseyColor = userClub.jerseyColor;
+                    this.playerTeam.crestSeed   = userClub.crestSeed;
+                    if (typeof CrestGenerator !== 'undefined') {
+                        this.playerTeam.crestSVG   = CrestGenerator.generateSVG(userClub.crestSeed, userClub.jerseyColor, 70);
+                        this.playerTeam.crestSVGSm = CrestGenerator.generateSVG(userClub.crestSeed, userClub.jerseyColor, 44);
+                    }
+                    GameStorage?.savePlayerTeam?.(this.playerTeam.serialize());
+                }
+
+                const overlay = document.getElementById('onboardingOverlay');
+                if (overlay) {
+                    overlay.classList.remove('active');
+                    overlay.setAttribute('aria-hidden', 'true');
+                }
+                this._refreshManagerLabel();
+                // Land on the Clubhouse, not the formation pick
+                this._enterClubhouse();
+                console.log(`Career started: ${name} · ${nation.name} · ${userClub?.clubName || city.name}`);
+            }
+
+            // Updates the manager slot in the top bar (right of the brand title,
+            // left of the hamburger). Hidden when no manager profile exists.
+            _refreshManagerLabel() {
+                const slot = document.getElementById('topMenuManager');
+                if (!slot) return;
+                const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                if (!mgr?.name) {
+                    slot.innerHTML = '';
+                    return;
+                }
+                const club = mgr.clubName ? `<span class="tmm-sep">·</span><span class="tmm-club">${mgr.clubName}</span>` : '';
+                slot.innerHTML = `<span class="tmm-mgr">${mgr.name}</span>${club}`;
+            }
+
+            // ─── Clubhouse ───────────────────────────────────────────────────
+            // Post-onboarding home base — left menu + stadium illustration.
+            // Menu items link to existing screens (management / match) plus the
+            // shared modals (history / league table).
+            _enterClubhouse() {
+                const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                if (!mgr) return;
+
+                // Header — club crest + name + sub-line
+                const crestSlot = document.getElementById('chCrestSlot');
+                if (crestSlot && this.playerTeam?.crestSVG) {
+                    crestSlot.innerHTML = this.playerTeam.crestSVG;
+                }
+                const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+                const clubName = this.playerTeam?.clubName || mgr.clubName || 'Your Club';
+                const subLine  = `${mgr.nationFlag || ''} ${mgr.city || ''}${mgr.city ? ' · ' : ''}${mgr.nationName || ''}`.trim();
+                setText('chClubName',   clubName);
+                setText('chClubSub',    subLine);
+                setText('chBannerName', clubName);
+                setText('chBannerSub',  subLine);
+
+                // Stadium illustration (built once per render to reflect kit colour)
+                this._renderStadiumSVG(this.playerTeam?.jerseyColor || '#FFD700');
+
+                // Wire menu buttons (idempotent — re-attached each render)
+                document.querySelectorAll('.ch-menu-item').forEach(btn => {
+                    const fresh = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(fresh, btn);
+                    fresh.addEventListener('click', () => this._handleClubhouseAction(fresh.dataset.clubhouseAction));
+                });
+
+                // Default to the stadium view + highlight the Stadium menu item.
+                // Seed the nav stack with this entry so Back goes nowhere yet
+                // but Forward will work after the next navigation.
+                this._navigateTo('🏟️ Stadium', () => {
+                    this.switchScreen('clubhouseScreen');
+                    this._setClubhouseView('stadium');
+                });
+            }
+
+            _handleClubhouseAction(action) {
+                switch (action) {
+                    case 'home':
+                        this._navigateTo('🏟️ Stadium', () => this._setClubhouseView('stadium'));
+                        break;
+                    case 'squad':
+                        this._navigateTo('👥 Squad', () => {
+                            this._setClubhouseView('squad');
+                            this._renderClubhouseSquad();
+                        });
+                        break;
+                    case 'tactics':
+                        // Inline management editor (relocated into the right pane)
+                        this._navigateTo('📋 Tactics & XI', () => this._openTacticsView());
+                        break;
+                    case 'play':
+                        this._navigateTo('⚽ Play Match', () => this.switchScreen('formationScreen'));
+                        break;
+                    case 'history':
+                        this._showHistoryModal();
+                        break;
+                    case 'league':
+                        this._navigateTo('🏆 League Table', () => {
+                            this._setClubhouseView('league');
+                            this._renderClubhouseLeague();
+                        });
+                        break;
+                    case 'fixtures':
+                        this._navigateTo('📅 Fixtures', () => {
+                            this._setClubhouseView('fixtures');
+                            this._renderClubhouseFixtures();
+                        });
+                        break;
+                    case 'office':
+                        alert(`Manager's office — coming soon.\n\nProfile: ${(GameStorage?.loadManager()?.name) || '—'}`);
+                        break;
+                }
+            }
+
+            // Moves the inner children of #managementScreen into #chTacticsHost
+            // exactly once at boot. After this, the standalone management screen
+            // div is empty but still present (so anything that still references
+            // it doesn't blow up) and all #benchList / #formationPitch / etc.
+            // queries continue to resolve, just under a new parent.
+            _relocateManagementContent() {
+                const src  = document.getElementById('managementScreen');
+                const host = document.getElementById('chTacticsHost');
+                if (!src || !host) return;
+                if (host.firstChild) return;          // idempotent — only move once
+                while (src.firstChild) host.appendChild(src.firstChild);
+            }
+
+            // Opens the Tactics & XI sub-view inside the clubhouse right pane
+            // and runs the management-panel render so the squad list, formation
+            // pitch, and tactic buttons reflect the latest state.
+            _openTacticsView() {
+                this.switchScreen('clubhouseScreen');
+                this._setClubhouseView('tactics');
+                this.renderManagementPanel();
+            }
+
+            // Toggles which right-pane view is visible and which menu item is
+            // highlighted. Used for the inline (in-pane) clubhouse content
+            // — Stadium / League / Fixtures / Squad / Tactics.
+            _setClubhouseView(viewName) {
+                document.querySelectorAll('.ch-view').forEach(el => {
+                    el.classList.toggle('active', el.dataset.view === viewName);
+                });
+                const menuKey = viewName === 'stadium' ? 'home' : viewName;
+                document.querySelectorAll('.ch-menu-item').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.clubhouseAction === menuKey);
+                });
+            }
+
+            // Renders the league table inline in the clubhouse right pane.
+            // Pulls from GameStorage.loadLeague() so updates after matches
+            // are reflected; falls back to a friendly empty state.
+            _renderClubhouseLeague() {
+                const body = document.getElementById('chLeagueBody');
+                if (!body) return;
+                const league = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : null;
+                if (!league || !league.length) {
+                    body.innerHTML = `<div class="tm-hist-empty">No league generated yet.</div>`;
+                    return;
+                }
+                const ordered = (typeof LeagueGenerator !== 'undefined')
+                    ? LeagueGenerator.sortTable(league)
+                    : league.slice();
+                body.innerHTML = `
+                    <div class="league-preview" style="max-height:none;">
+                        <div class="league-row header">
+                            <span class="lp-num">#</span><span></span><span class="lp-name">Club</span>
+                            <span class="lp-num">P</span><span class="lp-num">W</span><span class="lp-num">D</span>
+                            <span class="lp-num">L</span><span class="lp-num">GF:GA</span><span class="lp-num">Pts</span>
+                        </div>
+                        ${ordered.map((c, i) => `
+                            <div class="league-row ${c.isUserClub ? 'user-club' : ''}">
+                                <span class="lp-num">${i + 1}</span>
+                                <span class="lp-crest" style="background:${c.jerseyColor};"></span>
+                                <span class="lp-name">${c.clubName}</span>
+                                <span class="lp-num">${c.played}</span>
+                                <span class="lp-num">${c.wins}</span>
+                                <span class="lp-num">${c.draws}</span>
+                                <span class="lp-num">${c.losses}</span>
+                                <span class="lp-num">${c.goalsFor}:${c.goalsAgainst}</span>
+                                <span class="lp-num">${c.points}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Renders the round-robin fixture list inline in the clubhouse right pane,
+            // grouped by round. User's club rows are highlighted gold; played fixtures
+            // show the final score in place of the vs separator.
+            _renderClubhouseFixtures() {
+                const body = document.getElementById('chFixturesBody');
+                if (!body) return;
+                const fixtures = (typeof GameStorage !== 'undefined') ? GameStorage.loadFixtures() : null;
+                const league   = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : [];
+                const userClubName = (league || []).find(c => c.isUserClub)?.clubName || null;
+
+                if (!fixtures || !fixtures.length) {
+                    body.innerHTML = `<div class="tm-hist-empty">No fixtures generated yet.</div>`;
+                    return;
+                }
+
+                body.innerHTML = fixtures.map(rd => `
+                    <div class="ch-fix-round">
+                        <div class="ch-fix-round-head">Round ${rd.round}</div>
+                        ${rd.matches.map(m => {
+                            const isUser = userClubName && (m.home === userClubName || m.away === userClubName);
+                            const vsLabel = m.played
+                                ? `${m.homeScore ?? 0} – ${m.awayScore ?? 0}`
+                                : 'vs';
+                            return `<div class="ch-fix-match ${isUser ? 'user-club' : ''} ${m.played ? 'played' : ''}">
+                                <span class="ch-fix-home">${m.home}</span>
+                                <span class="ch-fix-vs">${vsLabel}</span>
+                                <span class="ch-fix-away">${m.away}</span>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                `).join('');
+            }
+
+            // Squad panel — full-pane player list (Starting XI, Bench, Reserves).
+            // Clicking a row slides an overlayed detail panel over the list.
+            _renderClubhouseSquad() {
+                const listEl = document.getElementById('chSquadList');
+                if (!listEl || !this.playerTeam?.players) return;
+                // Start with the detail overlay hidden on every (re-)entry
+                this._hideSquadDetail();
+
+                // Group players for the list (XI / bench / reserves)
+                const isOn   = id => this.playerTeam.onField?.some(p => p.id === id);
+                const isBench = id => this.playerTeam.bench?.some(p => p.id === id);
+                const xi      = this.playerTeam.players.filter(p => isOn(p.id));
+                const bench   = this.playerTeam.players.filter(p => isBench(p.id) && !isOn(p.id));
+                const others  = this.playerTeam.players.filter(p => !isOn(p.id) && !isBench(p.id));
+
+                const rowHtml = (p) => {
+                    const ovr = Math.round(p.overall || 60);
+                    const ovrCls = ovr >= 90 ? 'ovr-90' : ovr >= 80 ? 'ovr-80'
+                                 : ovr >= 70 ? 'ovr-70' : ovr >= 60 ? 'ovr-60'
+                                 : ovr >= 50 ? 'ovr-50' : 'ovr-40';
+                    const flag = p.flag ? `<span class="csr-flag">${p.flag}</span>` : '';
+                    const av = (typeof AvatarGenerator !== 'undefined' && p.avatar)
+                        ? AvatarGenerator.createSVG(p.avatar, 28, this.playerTeam.jerseyColor)
+                        : '';
+                    return `<div class="ch-squad-row" data-player-id="${p.id}">
+                        <span class="csr-num">${p.number ?? '·'}</span>
+                        <span class="csr-avatar">${av}</span>
+                        <span class="csr-name">${p.name}${flag}</span>
+                        <span class="csr-pos">${this._positionDisplay(p)}</span>
+                        <span class="csr-ovr ${ovrCls}">${ovr}</span>
+                    </div>`;
+                };
+
+                const section = (label, group) => group.length
+                    ? `<div class="ch-squad-section-head">${label} (${group.length})</div>${group.map(rowHtml).join('')}`
+                    : '';
+
+                listEl.innerHTML =
+                    section('Starting XI',  xi) +
+                    section('Bench',        bench) +
+                    section('Reserves',     others);
+
+                listEl.querySelectorAll('.ch-squad-row').forEach(row => {
+                    row.addEventListener('click', () => {
+                        const pid = parseInt(row.dataset.playerId, 10);
+                        const p = this.playerTeam.players.find(x => x.id === pid);
+                        if (!p) return;
+                        listEl.querySelectorAll('.ch-squad-row').forEach(r => r.classList.toggle('selected', r === row));
+                        this._showSquadDetail(p);
+                    });
+                });
+
+                // Wire the close affordances once per render (cloneNode wipes stale handlers)
+                const closeBtn = document.getElementById('chSquadCloseBtn');
+                if (closeBtn) {
+                    const fresh = closeBtn.cloneNode(true);
+                    closeBtn.parentNode.replaceChild(fresh, closeBtn);
+                    fresh.addEventListener('click', () => this._hideSquadDetail());
+                }
+                // Esc closes the detail overlay (one-shot listener bound to the squad view)
+                if (!this._squadEscBound) {
+                    this._squadEscBound = true;
+                    document.addEventListener('keydown', (e) => {
+                        if (e.key !== 'Escape') return;
+                        const overlay = document.getElementById('chSquadDetail');
+                        if (overlay?.classList.contains('active')) this._hideSquadDetail();
+                    });
+                }
+            }
+
+            // Show/hide the absolutely-positioned detail overlay over the squad list.
+            _showSquadDetail(player) {
+                this._renderSquadDetail(player);
+                const overlay = document.getElementById('chSquadDetail');
+                if (overlay) {
+                    overlay.classList.add('active');
+                    overlay.setAttribute('aria-hidden', 'false');
+                }
+            }
+
+            _hideSquadDetail() {
+                const overlay = document.getElementById('chSquadDetail');
+                if (overlay) {
+                    overlay.classList.remove('active');
+                    overlay.setAttribute('aria-hidden', 'true');
+                }
+                // Drop the "selected" highlight on whichever row was active
+                document.querySelectorAll('.ch-squad-row.selected').forEach(r => r.classList.remove('selected'));
+            }
+
+            // Renders one player's full visible profile into the overlay body.
+            // Hidden attributes (influence, luck) and the duplicate aliases
+            // (shooting, speed, offensive, defensive — kept for legacy code
+            // paths) are intentionally omitted.
+            _renderSquadDetail(player) {
+                const inner = document.getElementById('chSquadDetailInner');
+                if (!inner) return;
+                if (!player) {
+                    inner.innerHTML = '';
+                    return;
+                }
+
+                const ovr = Math.round(player.overall || 60);
+                const ovrCls = ovr >= 90 ? 'ovr-90' : ovr >= 80 ? 'ovr-80'
+                             : ovr >= 70 ? 'ovr-70' : ovr >= 60 ? 'ovr-60'
+                             : ovr >= 50 ? 'ovr-50' : 'ovr-40';
+                const av = (typeof AvatarGenerator !== 'undefined' && player.avatar)
+                    ? AvatarGenerator.createSVG(player.avatar, 84, this.playerTeam.jerseyColor)
+                    : '';
+
+                // Visible CM 03/04 attribute groups (everything but hidden + aliases)
+                const ATTR_GROUPS = [
+                    { label: 'Physical',    keys: ['pace', 'stamina', 'strength'] },
+                    { label: 'Mental',      keys: ['composure', 'determination', 'anticipation',
+                                                   'vision', 'creativity', 'offTheBall', 'positioning'] },
+                    { label: 'Technical',   keys: ['finishing', 'passing', 'dribbling', 'crossing',
+                                                   'heading', 'tackling', 'marking'] },
+                    { label: 'Goalkeeping', keys: ['reflexes', 'handling'] },
+                ];
+                const attrLabel = k => k
+                    .replace(/([A-Z])/g, ' $1')         // camelCase → spaced
+                    .replace(/^./, s => s.toUpperCase());
+                const attrColor = v =>
+                    v >= 85 ? '#16A34A' : v >= 70 ? '#86EFAC'
+                  : v >= 55 ? '#A0A0A0' : v >= 40 ? '#FACC15' : '#EF4444';
+                const attrRow = k => {
+                    const v = Math.round(player[k] || 0);
+                    return `<div class="ch-attr-row">
+                        <span>${attrLabel(k)}</span>
+                        <span class="ch-attr-bar"><div style="width:${v}%;background:${attrColor(v)};"></div></span>
+                        <span class="ch-attr-val">${v}</span>
+                    </div>`;
+                };
+                const groupSection = g => `
+                    <div class="ch-detail-section">
+                        <div class="ch-detail-section-head">${g.label}</div>
+                        <div class="ch-attr-grid">${g.keys.map(attrRow).join('')}</div>
+                    </div>`;
+
+                // Position summary — natural + secondary list
+                const secondaries = (player.secondaryPositions || []).filter(Boolean);
+                const positionsHtml = `
+                    <div class="ch-detail-section">
+                        <div class="ch-detail-section-head">Positions</div>
+                        <div class="ch-pos-list">
+                            <span class="ch-pos-pill ch-pos-natural">${player.naturalPosition || player.position || '?'} · Natural</span>
+                            ${secondaries.map(s => `<span class="ch-pos-pill">${s} · Secondary</span>`).join('')}
+                        </div>
+                    </div>`;
+
+                // Form (PES-style morale arrow + label)
+                const moraleHtml = `
+                    <div class="ch-detail-section">
+                        <div class="ch-detail-section-head">Form</div>
+                        <div class="ch-form-row">
+                            ${this._moraleArrowSVG(player.morale, 22)}
+                            <span style="color:${this._moraleColor(player.morale)}; font-weight: 700; letter-spacing: 0.4px;">${this._moraleLabel(player.morale)}</span>
+                        </div>
+                    </div>`;
+
+                const career = `${player.appearances || 0} apps · ${player.goals || 0} g · ${player.assists || 0} a`;
+
+                inner.innerHTML = `
+                    <div class="ch-detail-head">
+                        <div class="ch-detail-avatar">${av}</div>
+                        <div class="ch-detail-titles">
+                            <div class="ch-detail-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
+                            <div class="ch-detail-pos">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)}
+                                <span class="ch-ovr ${ovrCls}">${ovr}</span>
+                            </div>
+                            <div class="ch-detail-bio">Age ${player.age ?? '?'} · ${player.height ?? '?'} cm · ${this._footDisplay(player.foot)}${
+                                this._isOutOfPosition(player)
+                                    ? ` · <span style="color:#FF9500;">⚠ playing ${player.position}</span>`
+                                    : ''
+                            }</div>
+                            <div class="ch-detail-bio" style="margin-top:6px;">#${player.number ?? '·'} · ${career}</div>
+                        </div>
+                    </div>
+                    ${positionsHtml}
+                    ${moraleHtml}
+                    ${ATTR_GROUPS.map(groupSection).join('')}
+                `;
+            }
+
+            // ─── Navigation stack (back / forward) ─────────────────────────
+            // Pushes a labelled entry whose .apply() re-runs the navigation
+            // (e.g. switch screen + set clubhouse view). The floating buttons
+            // step through the stack without re-pushing.
+            _initNavStack() {
+                if (this._navStack) return;        // idempotent
+                this._navStack = [];
+                this._navIdx   = -1;
+                const back = document.getElementById('navBackBtn');
+                const fwd  = document.getElementById('navFwdBtn');
+                if (back) back.addEventListener('click', () => this._navBack());
+                if (fwd)  fwd .addEventListener('click', () => this._navForward());
+                this._refreshNavButtons();
+            }
+
+            _navigateTo(label, applyFn) {
+                if (!this._navStack) this._initNavStack();
+                // Truncate any "forward" history — new branch
+                if (this._navIdx < this._navStack.length - 1) {
+                    this._navStack = this._navStack.slice(0, this._navIdx + 1);
+                }
+                // Avoid pushing exact-same consecutive entry
+                const last = this._navStack[this._navIdx];
+                if (!last || last.label !== label) {
+                    this._navStack.push({ label, apply: applyFn });
+                    this._navIdx = this._navStack.length - 1;
+                }
+                applyFn();
+                this._refreshNavButtons();
+            }
+
+            _navBack() {
+                if (!this._navStack || this._navIdx <= 0) return;
+                this._navIdx--;
+                try { this._navStack[this._navIdx].apply(); } catch (e) { console.warn('nav back failed', e); }
+                this._refreshNavButtons();
+            }
+
+            _navForward() {
+                if (!this._navStack || this._navIdx >= this._navStack.length - 1) return;
+                this._navIdx++;
+                try { this._navStack[this._navIdx].apply(); } catch (e) { console.warn('nav forward failed', e); }
+                this._refreshNavButtons();
+            }
+
+            _refreshNavButtons() {
+                const back = document.getElementById('navBackBtn');
+                const fwd  = document.getElementById('navFwdBtn');
+                const lbl  = document.getElementById('navLabel');
+                if (back) back.disabled = !this._navStack || this._navIdx <= 0;
+                if (fwd)  fwd .disabled = !this._navStack || this._navIdx >= this._navStack.length - 1;
+                if (lbl) {
+                    const entry = this._navStack?.[this._navIdx];
+                    lbl.textContent = entry?.label || '—';
+                }
+            }
+
+            // Renders a stylised football stadium into the #chStadium slot —
+            // outer ring of stands, oval pitch, centre circle + halfway line,
+            // floodlight cones, and the kit-colour seats in the lower tier.
+            _renderStadiumSVG(kitColor) {
+                const slot = document.getElementById('chStadium');
+                if (!slot) return;
+                const c = kitColor || '#FFD700';
+                slot.innerHTML = `
+                    <svg viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Sky / stand back -->
+                        <defs>
+                            <linearGradient id="chSky" x1="0" x2="0" y1="0" y2="1">
+                                <stop offset="0" stop-color="#0a1428"/><stop offset="1" stop-color="#1c3960"/>
+                            </linearGradient>
+                            <radialGradient id="chPitch" cx="0.5" cy="0.5" r="0.6">
+                                <stop offset="0" stop-color="#268f26"/><stop offset="1" stop-color="#155515"/>
+                            </radialGradient>
+                            <radialGradient id="chLight" cx="0.5" cy="0" r="0.9">
+                                <stop offset="0" stop-color="rgba(255,250,200,0.65)"/>
+                                <stop offset="1" stop-color="rgba(255,250,200,0)"/>
+                            </radialGradient>
+                        </defs>
+                        <rect width="200" height="130" fill="url(#chSky)"/>
+                        <!-- Floodlights -->
+                        <ellipse cx="40" cy="20" rx="40" ry="22" fill="url(#chLight)"/>
+                        <ellipse cx="160" cy="20" rx="40" ry="22" fill="url(#chLight)"/>
+                        <!-- Outer stadium shell (stands) -->
+                        <ellipse cx="100" cy="85" rx="92" ry="40" fill="#1a1a1a" stroke="#333" stroke-width="0.8"/>
+                        <!-- Upper-tier seats -->
+                        <ellipse cx="100" cy="80"  rx="86" ry="34" fill="#2a2a2a"/>
+                        <!-- Lower tier seats in kit colour -->
+                        <ellipse cx="100" cy="84"  rx="78" ry="30" fill="${c}" opacity="0.32"/>
+                        <ellipse cx="100" cy="84"  rx="78" ry="30" fill="none" stroke="${c}" stroke-width="0.6" opacity="0.7"/>
+                        <!-- Pitch -->
+                        <ellipse cx="100" cy="86" rx="70" ry="24" fill="url(#chPitch)"/>
+                        <!-- Mowing stripes -->
+                        <ellipse cx="100" cy="86" rx="60" ry="20" fill="rgba(255,255,255,0.05)"/>
+                        <ellipse cx="100" cy="86" rx="40" ry="13" fill="rgba(255,255,255,0.04)"/>
+                        <!-- Halfway line + centre circle + spot -->
+                        <line x1="100" y1="63" x2="100" y2="109" stroke="#fff" stroke-width="0.5" opacity="0.7"/>
+                        <ellipse cx="100" cy="86" rx="10" ry="4" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.7"/>
+                        <circle  cx="100" cy="86" r="0.7" fill="#fff" opacity="0.85"/>
+                        <!-- Goals (just hinted at) -->
+                        <rect x="28" y="83" width="3" height="6" fill="#fff" opacity="0.6"/>
+                        <rect x="169" y="83" width="3" height="6" fill="#fff" opacity="0.6"/>
+                        <!-- Floodlight pylons -->
+                        <line x1="22" y1="58" x2="22" y2="20"   stroke="#444" stroke-width="1"/>
+                        <line x1="178" y1="58" x2="178" y2="20" stroke="#444" stroke-width="1"/>
+                        <rect x="17" y="14" width="10" height="6" fill="#222" stroke="#555" stroke-width="0.4"/>
+                        <rect x="173" y="14" width="10" height="6" fill="#222" stroke="#555" stroke-width="0.4"/>
+                    </svg>
+                `;
+            }
+
+            // Quick league table modal (re-uses .modal-overlay styling)
+            _showLeagueModal() {
+                const league = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : null;
+                let modal = document.getElementById('leagueModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'leagueModal';
+                    modal.className = 'modal-overlay';
+                    document.body.appendChild(modal);
+                }
+                if (!league || !league.length) {
+                    modal.innerHTML = `<div class="modal-card"><div class="modal-head"><span>League Table</span><button class="modal-close">×</button></div><div class="modal-body"><p style="color:#888;text-align:center;padding:24px">No league generated yet.</p></div></div>`;
+                } else {
+                    const ordered = (typeof LeagueGenerator !== 'undefined') ? LeagueGenerator.sortTable(league) : league;
+                    modal.innerHTML = `
+                        <div class="modal-card modal-card-wide">
+                            <div class="modal-head">
+                                <span>League Table</span>
+                                <button class="modal-close" aria-label="Close">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="league-preview">
+                                    <div class="league-row header">
+                                        <span class="lp-num">#</span><span></span><span class="lp-name">Club</span>
+                                        <span class="lp-num">P</span><span class="lp-num">W</span><span class="lp-num">D</span>
+                                        <span class="lp-num">L</span><span class="lp-num">GF:GA</span><span class="lp-num">Pts</span>
+                                    </div>
+                                    ${ordered.map((c, i) => `
+                                        <div class="league-row ${c.isUserClub ? 'user-club' : ''}">
+                                            <span class="lp-num">${i + 1}</span>
+                                            <span class="lp-crest" style="background:${c.jerseyColor};"></span>
+                                            <span class="lp-name">${c.clubName}</span>
+                                            <span class="lp-num">${c.played}</span>
+                                            <span class="lp-num">${c.wins}</span>
+                                            <span class="lp-num">${c.draws}</span>
+                                            <span class="lp-num">${c.losses}</span>
+                                            <span class="lp-num">${c.goalsFor}:${c.goalsAgainst}</span>
+                                            <span class="lp-num">${c.points}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>`;
+                }
+                modal.classList.add('active');
+                modal.querySelector('.modal-close').addEventListener('click', () => modal.classList.remove('active'));
+                modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('active'); };
             }
 
             calculateOverall(player) {
@@ -1474,6 +2836,9 @@
                 // keep legacy teamInstruction in sync with mentality
                 const mentMap = { 'ultra-def': 'defensive', 'defensive': 'defensive', 'normal': 'neutral', 'attacking': 'offensive', 'gung-ho': 'offensive' };
                 this.teamInstruction = mentMap[this.tactics.mentality] || 'neutral';
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.saveTactics(this.tactics, this.playerFormation);
+                }
             }
 
             // Tiered colour scale for an overall rating (0–100):
@@ -1504,12 +2869,21 @@
             _initPlayerStats() {
                 const reset = p => {
                     p.stats = p.stats || {};
-                    p.stats.dribbles = 0;
-                    p.stats.passes = 0;
-                    p.stats.shots = 0;
-                    p.stats.duelsWon = 0;
-                    p.stats.minutesPlayed = 0;
-                    p.stats.subbedOnMinute = null;
+                    p.stats.dribbles        = 0;
+                    p.stats.passes          = 0;
+                    p.stats.passesCompleted = 0;
+                    p.stats.shots           = 0;
+                    p.stats.shotsOnTarget   = 0;
+                    p.stats.tackles         = 0;   // successful tackles (separate from generic duelsWon)
+                    p.stats.fouls           = 0;
+                    p.stats.yellowCards     = 0;
+                    p.stats.redCards        = 0;
+                    p.stats.goalsScored     = 0;   // per-match (career `goals` lives on the player too)
+                    p.stats.assistsGiven    = 0;
+                    p.stats.duelsWon        = 0;
+                    p.stats.minutesPlayed   = 0;
+                    p.stats.subbedOnMinute  = null;
+                    p.stats.rating          = 0;   // 1–10, computed at endMatch
                 };
                 this.playerTeam?.players?.forEach(reset);
                 this.cpuTeam?.players?.forEach(reset);
@@ -1534,6 +2908,59 @@
                     player.stats.minutesPlayed += this.rules.getMatchMinute(this.timeRemaining) - player.stats.subbedOnMinute;
                     player.stats.subbedOnMinute = null;
                 }
+            }
+
+            // CM 03/04-style 1.0–10.0 match rating, computed from in-match stats.
+            // Inputs: the player, whether the player's team won (true/false/null=draw).
+            // Caller is expected to set `player.stats.rating` from this.
+            _computePlayerRating(player, teamWon) {
+                if (!player?.stats) return 0;
+                const s = player.stats;
+                if ((s.minutesPlayed || 0) < 5) return 0;     // didn't really feature
+
+                let r = 6.0;                                  // baseline (decent performance)
+
+                // Attacking contributions
+                r += (s.goalsScored  || 0) * 1.00;
+                r += (s.assistsGiven || 0) * 0.45;
+                r += Math.min(0.60, (s.shotsOnTarget || 0) * 0.15);
+                r += Math.min(0.50, (s.dribbles      || 0) * 0.10);
+
+                // Passing — reward completion vs a 65% baseline
+                if ((s.passes || 0) > 0) {
+                    const pct = (s.passesCompleted || 0) / s.passes;
+                    r += Math.max(-1.0, Math.min(1.0, (pct - 0.65) * 1.6));
+                }
+
+                // Defensive contributions
+                r += Math.min(0.70, (s.tackles  || 0) * 0.12);
+                r += Math.min(0.40, (s.duelsWon || 0) * 0.06);
+
+                // Discipline penalties
+                r -= (s.fouls       || 0) * 0.12;
+                r -= (s.yellowCards || 0) * 0.40;
+                r -= (s.redCards    || 0) * 1.50;
+
+                // Team-result bonus / penalty
+                if (teamWon === true)  r += 0.35;
+                else if (teamWon === false) r -= 0.20;
+
+                return Math.max(3.0, Math.min(10.0, Math.round(r * 10) / 10));   // 1 decimal
+            }
+
+            // Computes rating for every player on both squads that featured
+            // (minutesPlayed > 0). Called once at endMatch. Stores back into
+            // player.stats.rating.
+            _computeAllRatings() {
+                const ps = this.playerScore, cs = this.cpuScore;
+                const playerWon = ps === cs ? null : ps > cs;
+                const cpuWon    = ps === cs ? null : cs > ps;
+                this.playerTeam?.players?.forEach(p => {
+                    p.stats.rating = this._computePlayerRating(p, playerWon);
+                });
+                this.cpuTeam?.players?.forEach(p => {
+                    p.stats.rating = this._computePlayerRating(p, cpuWon);
+                });
             }
 
             // Close out minutes for anyone still on the field — called at endMatch.
@@ -1573,6 +3000,13 @@
                 if (!natural || playing === natural) return false;
                 const secs = player.secondaryPositions || [];
                 return !secs.includes(playing);
+            }
+
+            // Pretty label for a player's foot preference (used in the detail card).
+            _footDisplay(foot) {
+                if (foot === 'left')  return '🦶 Left foot';
+                if (foot === 'both')  return '🦶 Two-footed';
+                return '🦶 Right foot';     // default + 'right'
             }
 
             // PES condition-arrow palette (classic PES era — best → worst:
@@ -1679,7 +3113,7 @@
                         <div class="player-detail-info">
                             <div class="player-detail-name">${player.flag ? player.flag + ' ' : ''}${player.name}</div>
                             <div class="player-detail-position">${player.nationality ? player.nationality + ' · ' : ''}${this._positionDisplay(player)} <span style="font-size:1.1em;font-weight:bold;color:${ovrColor};">${ovr}</span></div>
-                            <div class="player-detail-bio">Age ${player.age ?? '?'} · ${player.height ?? '?'} cm${
+                            <div class="player-detail-bio">Age ${player.age ?? '?'} · ${player.height ?? '?'} cm · ${this._footDisplay(player.foot)}${
                                 this._isOutOfPosition(player)
                                     ? ` · <span style="color:#FF9500;">⚠ playing ${player.position}</span>`
                                     : ''
@@ -1917,6 +3351,9 @@
                         // into the new formation's home positions.
                         this._applyPlayerFormationChange(oldFormation, formation);
                     }
+                    if (typeof GameStorage !== 'undefined') {
+                        GameStorage.saveTactics(this.tactics, this.playerFormation);
+                    }
                 } catch (error) {
                     console.error('Error in selectFormation:', error);
                 }
@@ -1972,6 +3409,12 @@
                     console.log('startMatch called');
                     this.isPreMatch = false;
                     this.rules.reset();
+                    // Persist the player team + tactics now so any mid-match
+                    // adjustments (instructions, customPos drags) survive a reload.
+                    if (typeof GameStorage !== 'undefined' && this.playerTeam) {
+                        GameStorage.savePlayerTeam(this.playerTeam.serialize());
+                        GameStorage.saveTactics(this.tactics, this.playerFormation);
+                    }
                     this.cpuFormation = this.getRandomFormation();
                     console.log('CPU formation:', this.cpuFormation);
 
@@ -2222,6 +3665,9 @@
                 document.querySelectorAll('.speed-btn').forEach(b => {
                     b.classList.toggle('active', b.dataset.speed === speed);
                 });
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.saveSettings({ speed });
+                }
             }
 
             // CM 03/04-style zone ratings: weighted attribute averages per zone
@@ -2428,12 +3874,24 @@
                     : 2;
 
                 if (this._phaseTicks >= maxBuildup) {
-                    this.passEvent(team);        // final ball over the top / into midfield
+                    const ok = this.passEvent(team);   // final ball over the top / into midfield
+                    if (!ok) {                          // pass given away / offside
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                        return;
+                    }
                     this._attackPhase = 'progression';
                     this._phaseTicks  = 0;
-                    this._advanceZone(1);         // shift one band forward
+                    this._advanceZone(1);               // shift one band forward
                 } else {
-                    this.passEvent(team);        // safe pass, staying in own half
+                    const ok = this.passEvent(team);   // safe pass, staying in own half
+                    if (!ok) {
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                        return;
+                    }
                     // Occasional small lane shift to keep things visually varied
                     if (Math.random() < 0.25) this._attackLane = (this._attackLane + (Math.random() < 0.5 ? -1 : 1) + 3) % 3;
                 }
@@ -2468,10 +3926,12 @@
                         this._attackPhase = 'buildup';
                         this._phaseTicks  = 0;
                     } else {
-                        // Defense clears — ball goes out for a corner
+                        // Defense clears — ball goes out for a corner. The attacking
+                        // team takes the corner, so they retain possession; the next
+                        // tick lands in the danger phase to resolve the in-box action.
                         this.cornerEvent(team);
-                        this._attackPhase = null;
-                        this._attackTeam  = null;
+                        this._attackPhase = 'danger';
+                        this._attackTeam  = team;
                         this._phaseTicks  = 0;
                     }
                     return;
@@ -2536,13 +3996,28 @@
                     const crossProb = Math.min(0.45, 0.05 + oftenCrossers * 0.10);
                     // Ball travels into the danger zone (final third)
                     this._setZone(team === 'player' ? 4 : 0, this._attackLane);
+                    // Final ball: header/through-ball always commits to danger;
+                    // a plain pass can be intercepted, which hands the ball over.
+                    let ok = true;
                     if (Math.random() < crossProb)        this.headerEvent(team, true);
                     else if (Math.random() < tbProb)      this.throughBallEvent(team);
-                    else                                  this.passEvent(team);
+                    else                                  ok = this.passEvent(team);
+                    if (!ok) {
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                        return;
+                    }
                     this._attackPhase = 'danger';
                     this._phaseTicks  = 0;
                 } else {
-                    this.passEvent(team);        // patient build-up in the final third
+                    const ok = this.passEvent(team);    // patient build-up in the final third
+                    if (!ok) {
+                        this._attackTeam  = opp;
+                        this._attackPhase = 'buildup';
+                        this._phaseTicks  = 0;
+                        return;
+                    }
                     // 25 % chance to advance one more band — keeps the attack moving forward
                     if (Math.random() < 0.25) this._advanceZone(1);
                     // Or a small lateral shift to widen / cut inside
@@ -2586,38 +4061,51 @@
 
                 const r2 = Math.random();
 
-                // Rare specials inside the danger phase — short-circuit the normal table
-                if (Math.random() < 0.04) { this.penaltyEvent(team);         return; }
-                if (Math.random() < 0.05) { this.freeKickEvent(team);        return; }
-                if (Math.random() < 0.06 && attackScore > 0.50) { this.oneOnOneEvent(team);   return; }
-                if (Math.random() < 0.05)                       { this.headerEvent(team, true); return; }
-                if (Math.random() < 0.04)                       { this.goalmouthScrambleEvent(team); return; }
-                if (Math.random() < 0.015 && attackScore > 0.55) { this.spectacularEvent(team); return; }
-                if (Math.random() < 0.012)                      { this.ownGoalEvent(team);    return; }
-                if (Math.random() < 0.020)                      { this.goalDisallowedEvent(team); return; }
+                // Sets the post-event possession so the NEXT generateEvent tick
+                // continues from the correct team. Pass the team that owns the
+                // ball after the event resolves; pass nothing to leave the
+                // state as null/null (kick-off or midfield-battle restart).
+                const restart = (nextTeam) => {
+                    if (!nextTeam) return;
+                    this._attackTeam  = nextTeam;
+                    this._attackPhase = 'buildup';
+                };
+
+                // Rare specials — most resolve internally (penalty / free kick /
+                // 1-on-1 / spectacular / own goal end the attack and the next
+                // tick starts with a midfield battle or kickoff). The ones with
+                // a clear post-event owner explicitly call restart().
+                if (Math.random() < 0.04) { this.penaltyEvent(team);                                        return; }
+                if (Math.random() < 0.05) { this.freeKickEvent(team);                                       return; }
+                if (Math.random() < 0.06 && attackScore > 0.50) { this.oneOnOneEvent(team);                 return; }
+                if (Math.random() < 0.05)                       { this.headerEvent(team, true);             return; }
+                if (Math.random() < 0.04)                       { this.goalmouthScrambleEvent(team); restart(opp); return; }   // scramble usually cleared
+                if (Math.random() < 0.015 && attackScore > 0.55) { this.spectacularEvent(team);             return; }
+                if (Math.random() < 0.012)                      { this.ownGoalEvent(team);                  return; }
+                if (Math.random() < 0.020)                      { this.goalDisallowedEvent(team); restart(opp); return; }     // defender's restart
 
                 if (attackScore > 0.62) {
-                    if (r2 < 0.28)       this.goalEvent(team);
-                    else if (r2 < 0.55)  this.chanceEvent(team);
-                    else if (r2 < 0.68)  this.missedChanceEvent(team);
-                    else if (r2 < 0.78)  this.barEvent(team);
-                    else if (r2 < 0.86)  this.cornerEvent(team);
-                    else                 this.saveEvent();
+                    if (r2 < 0.28)        this.goalEvent(team);                                  // → kickoff
+                    else if (r2 < 0.55)   this.chanceEvent(team);                                // → ambiguous (midfield battle)
+                    else if (r2 < 0.68) { this.missedChanceEvent(team); restart(opp); }          // defender's goal kick
+                    else if (r2 < 0.78) { this.barEvent(team);          restart(opp); }          // rebound usually cleared
+                    else if (r2 < 0.86) { this.cornerEvent(team);       restart(team); }         // attacker retains via corner
+                    else                { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
                 } else if (attackScore > 0.48) {
-                    if (r2 < 0.12)       this.goalEvent(team);
-                    else if (r2 < 0.32)  this.chanceEvent(team);
-                    else if (r2 < 0.50)  this.missedChanceEvent(team);
-                    else if (r2 < 0.64)  this.saveEvent();
-                    else if (r2 < 0.76)  this.barEvent(team);
-                    else if (r2 < 0.88)  this.cornerEvent(team);
-                    else                 this.tackleEvent(opp);
+                    if (r2 < 0.12)        this.goalEvent(team);
+                    else if (r2 < 0.32)   this.chanceEvent(team);
+                    else if (r2 < 0.50) { this.missedChanceEvent(team); restart(opp); }
+                    else if (r2 < 0.64) { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
+                    else if (r2 < 0.76) { this.barEvent(team);          restart(opp); }
+                    else if (r2 < 0.88) { this.cornerEvent(team);       restart(team); }
+                    else                { this.tackleEvent(opp);        restart(opp); }          // defender wins the ball
                 } else {
-                    if (r2 < 0.05)       this.goalEvent(team);
-                    else if (r2 < 0.16)  this.chanceEvent(team);
-                    else if (r2 < 0.38)  this.saveEvent();
-                    else if (r2 < 0.58)  this.missedChanceEvent(team);
-                    else if (r2 < 0.72)  this.cornerEvent(team);
-                    else                 this.tackleEvent(opp);
+                    if (r2 < 0.05)        this.goalEvent(team);
+                    else if (r2 < 0.16)   this.chanceEvent(team);
+                    else if (r2 < 0.38) { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
+                    else if (r2 < 0.58) { this.missedChanceEvent(team); restart(opp); }
+                    else if (r2 < 0.72) { this.cornerEvent(team);       restart(team); }
+                    else                { this.tackleEvent(opp);        restart(opp); }
                 }
             }
 
@@ -2659,14 +4147,23 @@
                 if (team === 'player') {
                     this.playerScore++;
                     this.stats.playerShots++;
+                    this.stats.playerShotsOnTarget++;
                     this.momentum = Math.min(100, this.momentum + 20);
                 } else {
                     this.cpuScore++;
                     this.stats.cpuShots++;
+                    this.stats.cpuShotsOnTarget++;
                     this.momentum = Math.max(0, this.momentum - 15);
                 }
                 const assistText = assist ? ` (assist: <b class="ev-name">${assist.name}</b>)` : '';
                 this._addStat(scorer, 'shots');
+                this._addStat(scorer, 'shotsOnTarget');
+                this._addStat(scorer, 'goalsScored');         // per-match goals
+                if (scorer && typeof scorer.goals === 'number') scorer.goals++;   // career
+                if (assist) {
+                    this._addStat(assist, 'assistsGiven');
+                    if (typeof assist.assists === 'number') assist.assists++;
+                }
                 this.audio?.goalRoar();
                 this.dramatic?.play('goal', { name: scorer.name, minute, color: (team === 'player' ? this.playerTeam?.jerseyColor : this.cpuTeam?.jerseyColor) });
                 this.addEvent(`⚽ GOAL (${minute}')! <b class="ev-name">${scorer.name}</b> scores!${assistText}`, 'goal', team);
@@ -2740,6 +4237,9 @@
                     const effectiveFoulRate = team === 'player' ? foulRate : 0.40;
                     if (Math.random() < effectiveFoulRate) {
                         this.audio?.foul();
+                        this._addStat(defender, 'fouls');
+                        if (team === 'player') this.stats.playerFouls++;
+                        else                   this.stats.cpuFouls++;
                         this.addEvent(`🟡 Foul by <b class="ev-name">${defender.name}</b> (${minute}')! Free kick awarded.`, 'tackle', team, 'medium');
 
                         // A foul in the attacker's attacking third is a "dangerous" free kick —
@@ -2768,6 +4268,7 @@
                 }
 
                 this._addStat(defender, 'duelsWon');
+                this._addStat(defender, 'tackles');   // per-player tackle counter for rating
                 if (team === 'player') {
                     this.stats.playerTackles++;
                     this.momentum = Math.min(100, this.momentum + 3);
@@ -2807,7 +4308,12 @@
                         ? `⚪ <b class="ev-name">${passer.name}</b>'s direct pass is intercepted!`
                         : `⚪ <b class="ev-name">${passer.name}</b> gives the ball away!`;
                     this.addEvent(lostDesc, 'pass', team);
-                    return;
+                    // Count the attempt even though it failed — pass-completion %
+                    // wouldn't make sense otherwise.
+                    this._addStat(passer, 'passes');
+                    if (team === 'player') this.stats.playerPasses++;
+                    else                   this.stats.cpuPasses++;
+                    return false;     // turnover → caller must hand possession to opp
                 }
 
                 const passerId = teamObj.onField.indexOf(passer);
@@ -2826,10 +4332,12 @@
                             'tackle', team === 'player' ? 'cpu' : 'player'
                         );
                         this._emitMatchEvent('offside', { team }); // team = the offside attacker's team
+                        if (team === 'player') this.stats.playerOffsides++;
+                        else                   this.stats.cpuOffsides++;
                         this.momentum = team === 'player'
                             ? Math.max(0,   this.momentum - 4)
                             : Math.min(100, this.momentum + 4);
-                        return;
+                        return false;     // free kick to the defending team
                     }
                 }
 
@@ -2841,16 +4349,20 @@
                 const passDesc = styleLabel;
 
                 this._addStat(passer, 'passes');
+                this._addStat(passer, 'passesCompleted');
                 if (team === 'player') {
                     this.stats.playerPasses++;
+                    this.stats.playerPassesCompleted++;
                     this.addEvent(`⚪ <b class="ev-name">${passer.name}</b> — ${passDesc} to <b class="ev-name">${receiver.name}</b>`, 'pass', team);
                     this._emitMatchEvent('pass', { passer: passerId, receiver: receiverId, team });
                 } else {
                     this.stats.cpuPasses++;
+                    this.stats.cpuPassesCompleted++;
                     this.addEvent(`⚪ <b class="ev-name">${passer.name}</b> threads a ${passDesc} to <b class="ev-name">${receiver.name}</b>`, 'pass', team);
                     this._emitMatchEvent('pass', { passer: passerId + baseId, receiver: receiverId + baseId, team });
                 }
                 this.updatePossession();
+                return true;     // pass completed — caller can continue the attack
             }
 
             saveEvent() {
@@ -2946,6 +4458,8 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
                 const player = teamObj.getRandomPlayer(true);
+                if (team === 'player') this.stats.playerCorners++;
+                else                   this.stats.cpuCorners++;
                 this.audio?.kick();
                 this.addEvent(`🚩 Corner kick! <b class="ev-name">${player.name}</b> delivers into the box`, 'pass', team, 'medium');
                 this._emitMatchEvent('corner', { team });
@@ -2985,6 +4499,7 @@
                 if (result.cardType === 'yellow') {
                     const count = this.rules.yellowCount(player);
                     this.cardData[team].push({ player: player.name, type: 'yellow', time: minute });
+                    this._addStat(player, 'yellowCards');
                     this.audio?.yellowCard();
                     this.addEvent(
                         `🟡 YELLOW CARD (${minute}') — <b class="ev-name">${player.name}</b> is booked!` +
@@ -2994,6 +4509,8 @@
                 } else if (result.cardType === 'second_yellow') {
                     this.cardData[team].push({ player: player.name, type: 'yellow', time: minute });
                     this.cardData[team].push({ player: player.name, type: 'red',    time: minute });
+                    this._addStat(player, 'yellowCards');
+                    this._addStat(player, 'redCards');
                     this.audio?.redCard();
                     this.dramatic?.play('redCard', { name: player.name, minute, kind: 'second' });
                     this.addEvent(
@@ -3009,6 +4526,7 @@
                 } else {
                     // Direct red card
                     this.cardData[team].push({ player: player.name, type: 'red', time: minute });
+                    this._addStat(player, 'redCards');
                     this.audio?.redCard();
                     this.dramatic?.play('redCard', { name: player.name, minute, kind: 'red' });
                     this.addEvent(
@@ -3128,6 +4646,8 @@
                 const teamObj = team === 'player' ? this.playerTeam : this.cpuTeam;
                 const defTeamObj = team === 'player' ? this.cpuTeam : this.playerTeam;
                 if (teamObj.onField.length === 0) return;
+                if (team === 'player') this.stats.playerFreeKicks++;
+                else                   this.stats.cpuFreeKicks++;
 
                 // Specialist: highest finishing + crossing among onfield
                 const taker = teamObj.onField.slice().sort((a,b) =>
@@ -3145,6 +4665,7 @@
                     gkColor: this._gkJerseyColor(defTeamObj.jerseyColor),
                     attackTeam: teamObj.onField    || [],
                     defendTeam: defTeamObj.onField || [],
+                    taker,                                // pass the chosen specialist so the scene can stand them on the correct side of the ball
                 });
 
                 const skill = ((taker.finishing || 60) + (taker.crossing || 60)) / 2 / 100;
@@ -3609,8 +5130,8 @@
                 this.isPreMatch = false;
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn = null;
-                this.renderManagementPanel();
-                this.switchScreen('managementScreen');
+                // Open the tactics editor inside the clubhouse pane
+                this._navigateTo('📋 Tactics & XI', () => this._openTacticsView());
             }
 
             // Short-lived notice shown at the top of the management panel.
@@ -4503,7 +6024,73 @@
                 document.getElementById('endBtn').style.display = 'block';
 
                 this._finalizePlayerStats();   // close minute counters for everyone still on
+                this._computeAllRatings();     // 1.0–10.0 rating for every featured player
                 this.audio?.whistle(false);    // long full-time whistle
+
+                // ── Persist the result + the updated player team ───────────────
+                if (typeof GameStorage !== 'undefined') {
+                    try {
+                        // Snapshot every player who featured (minutesPlayed > 0) for
+                        // the saved history entry, so the Match History detail view
+                        // can render line-ups + ratings without needing the full
+                        // team objects.
+                        const snapTeam = (teamObj) => {
+                            if (!teamObj) return null;
+                            const lineup = (teamObj.players || [])
+                                .filter(p => p.stats?.minutesPlayed > 0)
+                                .map(p => ({
+                                    name:     p.name,
+                                    position: p.position,
+                                    number:   p.number,
+                                    rating:   p.stats?.rating || 0,
+                                    minutes:  Math.round(p.stats?.minutesPlayed || 0),
+                                    goals:    p.stats?.goalsScored  || 0,
+                                    assists:  p.stats?.assistsGiven || 0,
+                                    shots:    p.stats?.shots        || 0,
+                                    shotsOnTarget: p.stats?.shotsOnTarget || 0,
+                                    passes:   p.stats?.passes       || 0,
+                                    passesCompleted: p.stats?.passesCompleted || 0,
+                                    tackles:  p.stats?.tackles      || 0,
+                                    dribbles: p.stats?.dribbles     || 0,
+                                    fouls:    p.stats?.fouls        || 0,
+                                    yellowCards: p.stats?.yellowCards || 0,
+                                    redCards:    p.stats?.redCards    || 0,
+                                }))
+                                .sort((a, b) => b.rating - a.rating);
+                            return {
+                                clubName:    teamObj.clubName,
+                                jerseyColor: teamObj.jerseyColor,
+                                lineup,
+                            };
+                        };
+
+                        GameStorage.appendHistory({
+                            playerTeam:      this.playerTeam?.clubName,
+                            cpuTeam:         this.cpuTeam?.clubName,
+                            playerScore:     this.playerScore,
+                            cpuScore:        this.cpuScore,
+                            playerFormation: this.playerFormation,
+                            cpuFormation:    this.cpuFormation,
+                            goals: (this.goals || []).map(g => ({
+                                team: g.team, scorer: g.scorer, assister: g.assister, minute: parseInt(g.time, 10),
+                            })),
+                            cards: {
+                                player: (this.cardData?.player || []).slice(),
+                                cpu:    (this.cardData?.cpu    || []).slice(),
+                            },
+                            substitutions: (this.substitutions || []).slice(),
+                            teamStats: { ...this.stats },
+                            playerLineup: snapTeam(this.playerTeam),
+                            cpuLineup:    snapTeam(this.cpuTeam),
+                        });
+                        if (this.playerTeam) {
+                            GameStorage.savePlayerTeam(this.playerTeam.serialize());
+                        }
+                    } catch (e) {
+                        console.warn('endMatch: persist failed', e?.message);
+                    }
+                }
+
                 this.switchScreen('resultScreen');
                 this.displayResult();
             }
@@ -4673,7 +6260,16 @@
                 this.isPreMatch = true;
                 this.playerFormation = '442';
                 this.cpuFormation = null;
-                this.playerTeam = new Team('You');
+                // "Play again" should keep the career squad + tactics if persisted.
+                // resetCareer() wipes that storage so this falls back to fresh generation.
+                const savedTactics = (typeof GameStorage !== 'undefined') ? GameStorage.loadTactics() : null;
+                if (savedTactics?.formation) this.playerFormation = savedTactics.formation;
+                const savedTeam = (typeof GameStorage !== 'undefined') ? GameStorage.loadPlayerTeam() : null;
+                if (savedTeam && Array.isArray(savedTeam.players) && savedTeam.players.length) {
+                    this.playerTeam = new Team('You', null, savedTeam);
+                } else {
+                    this.playerTeam = new Team('You');
+                }
                 this.playerTeam.setupSquad(this.playerFormation);
                 this.cpuTeam = null;
                 this.playerScore = 0;
@@ -4689,20 +6285,23 @@
                 this.teamInstruction = 'neutral';
                 this._cpuLastFormationChangeMinute = 0;
                 this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
+                if (savedTactics?.tactics) this.tactics = { ...this.tactics, ...savedTactics.tactics };
                 this.momentum = 50;
                 this._attackPhase = null;
                 this._attackTeam  = null;
                 this._phaseTicks  = 0;
                 this.rules.reset();
                 this.stats = {
-                    playerShots: 0,
-                    cpuShots: 0,
-                    playerTackles: 0,
-                    cpuTackles: 0,
-                    playerPasses: 0,
-                    cpuPasses: 0,
-                    playerPossession: 50,
-                    cpuPossession: 50
+                    playerShots: 0, cpuShots: 0,
+                    playerShotsOnTarget: 0, cpuShotsOnTarget: 0,
+                    playerTackles: 0, cpuTackles: 0,
+                    playerPasses: 0, cpuPasses: 0,
+                    playerPassesCompleted: 0, cpuPassesCompleted: 0,
+                    playerCorners: 0, cpuCorners: 0,
+                    playerFouls: 0, cpuFouls: 0,
+                    playerOffsides: 0, cpuOffsides: 0,
+                    playerFreeKicks: 0, cpuFreeKicks: 0,
+                    playerPossession: 50, cpuPossession: 50,
                 };
 
                 document.getElementById('pauseBtn').style.display = 'block';
@@ -4718,20 +6317,47 @@
                     if (btn) btn.classList.add('active');
                 });
 
-                this.renderManagementPanel();
-                this.switchScreen('managementScreen');
+                this._openTacticsView();
+            }
+
+            // Wipes the saved manager profile, player team, tactics, and match
+            // history — does NOT touch settings (mute / volume / speed) — then
+            // resets the simulator with a freshly-generated squad and sends
+            // the user back to the onboarding step 1. Callable from console:
+            //   game.resetCareer()
+            resetCareer() {
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.resetCareer();   // wipes manager + team + tactics + history
+                }
+                this.reset();
+                this._refreshManagerLabel();      // title falls back to generic label
+                this._showOnboarding();           // back to step 1 (choose manager name)
+                console.log('Career reset — onboarding shown.');
             }
         }
 
-        console.log('Initializing Football Simulator...');
-        try {
-            window.game = new FootballSimulator();
-            console.log('Football Simulator initialized successfully');
-            console.log('Game object available at window.game');
-            document.body.style.opacity = '1'; // Ensure page is visible
-        } catch (error) {
-            console.error('Error initializing Football Simulator:', error);
-            console.error('Stack:', error.stack);
-            alert('FATAL ERROR during initialization:\n\n' + error.message + '\n\nCheck browser console (F12) for more details.');
-            document.body.innerHTML = '<div style="padding: 20px; font-family: monospace; color: red;"><h1>Game Initialization Failed</h1><p>Error: ' + error.message + '</p><p>Stack: ' + error.stack + '</p></div>';
+        function bootstrapSimulator() {
+            console.log('Initializing Football Simulator...');
+            try {
+                window.game = new FootballSimulator();
+                console.log('Football Simulator initialized successfully');
+                console.log('Game object available at window.game');
+                document.body.style.opacity = '1'; // Ensure page is visible
+            } catch (error) {
+                console.error('Error initializing Football Simulator:', error);
+                console.error('Stack:', error.stack);
+                alert('FATAL ERROR during initialization:\n\n' + error.message + '\n\nCheck browser console (F12) for more details.');
+                document.body.innerHTML = '<div style="padding: 20px; font-family: monospace; color: red;"><h1>Game Initialization Failed</h1><p>Error: ' + error.message + '</p><p>Stack: ' + error.stack + '</p></div>';
+            }
+        }
+
+        // Wait for screens/<name>.html partials to inject into the page before
+        // querying DOM nodes inside them. The loader (screens/screen-loader.js)
+        // exposes window.__screensReady (a Promise) and dispatches 'screensReady'.
+        // If the loader is absent (e.g. someone opened the page without it),
+        // bootstrap immediately as the legacy path.
+        if (window.__screensReady && typeof window.__screensReady.then === 'function') {
+            window.__screensReady.then(bootstrapSimulator, () => { /* loader already showed the error */ });
+        } else {
+            bootstrapSimulator();
         }

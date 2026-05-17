@@ -629,9 +629,13 @@ class MatchFlow {
         }
         if (attId == null) return;
 
-        // Shot origin = the event zone; ball flies a few units toward the actual goal line.
-        const shotX = x ?? (team === 'player' ? 89 : 11);
-        const shotY = y ?? (50 + (Math.random() - 0.5) * 24);
+        // Shot origin = the event zone; ball flies all the way toward goal.
+        const shotX  = x ?? (team === 'player' ? 89 : 11);
+        const shotY  = y ?? (50 + (Math.random() - 0.5) * 24);
+        // Goal mouth (just shy of the goal line — chance ≠ goal, so the ball
+        // arrives at the keeper / post then bounces back into play).
+        const goalX  = team === 'player' ? 95 : 5;
+        const goalY  = 50 + (Math.random() - 0.5) * 14;
 
         this._triggerRun(team, 1600);
 
@@ -640,7 +644,16 @@ class MatchFlow {
             this._move(attId, shotX, shotY, 460);
             setTimeout(() => {
                 this._ballOwner = null;
-                this._animBall(shotX + (team === 'player' ? 7 : -7), shotY, 380, true);
+                // 1) Shot flies from the shooter to the goal mouth
+                this._animBall(goalX, goalY, 420, true);
+                // 2) Blocked / deflected — ball bounces back out into the box
+                setTimeout(() => {
+                    const bounceX = team === 'player'
+                        ? 84 + Math.random() * 8       // 84–92 (just outside 6-yard area)
+                        : 8  + Math.random() * 8;
+                    const bounceY = this._clamp(goalY + (Math.random() - 0.5) * 22, 18, 82);
+                    this._animBall(bounceX, bounceY, 300);
+                }, 460);
             }, 280);
         }, 250);
 
@@ -716,36 +729,56 @@ class MatchFlow {
         const gkV   = this._vis(gkId);
         const attTeam = team === 'player' ? 'cpu' : 'player';
 
+        // The GK gathers the ball just in front of their goal mouth
+        const gkCatchX = homeX + (team === 'player' ? 2 : -2);
+        const gkCatchY = homeY + (Math.random() - 0.5) * 6;
+
         this._ballOwner = null;
-        // If the simulator told us where the shot came from, animate ball from that point
-        // toward the GK so the save visibly originates in the attacking zone.
+        // 1) Ball travels from the shot origin → GK
         if (x != null && y != null) {
             this._animBall(x, y, 80);
-            setTimeout(() => this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true), 90);
+            setTimeout(() => this._animBall(gkCatchX, gkCatchY, 340, true), 90);
         } else {
-            this._animBall(homeX, homeY + (Math.random()-0.5)*16, 360, true);
+            this._animBall(gkCatchX, gkCatchY, 360, true);
         }
 
+        // GK steps forward to gather it
         if (gkV) {
             this.anim.animateMove(gkId, gkV.pitchX, gkV.pitchY,
-                homeX + (team === 'player' ? 3 : -3),
-                homeY + (Math.random()-0.5)*22, 330);
+                gkCatchX, gkCatchY, 330);
         }
 
         // Attack repelled — attacking FWDs drop back onside immediately
         this._snapFwdsOnside(attTeam);
 
+        // 2) Resolve the save into one of two outcomes:
+        //    - clean catch (≈60 %): ball stays with the GK; the next simulator
+        //      event (defending-team buildup) will pick up from here.
+        //    - parry / punch (≈40 %): ball deflects to a loose-ball position
+        //      somewhere inside the penalty area, with random direction.
+        const isCatch = Math.random() < 0.60;
         setTimeout(() => {
-            const outId = this._randOf(team);
-            if (outId) {
-                this._ballTo(outId, 360);
-                this._applyPush(team, 3);
+            if (isCatch) {
+                // Anchor the ball to the GK so it visibly stays in their hands
+                this._ballOwner = gkId;
+                const v = this._vis(gkId);
+                if (v) this._animBall(v.pitchX, v.pitchY, 80);
+                this._applyPush(team, 2);   // small breather for defenders
             } else {
-                this._animBall(
-                    team === 'player' ? 22+Math.random()*14 : 64+Math.random()*14,
-                    50+(Math.random()-0.5)*30, 360);
+                // Punch / parry — ball deflects to a random nearby spot.
+                // Bounce direction is biased forward (away from goal line) so
+                // the loose ball ends up inside the box, not behind the goal.
+                const angle = (-1 + Math.random() * 2) * 0.9;     // -0.9..+0.9 rad
+                const dist  = 14 + Math.random() * 10;
+                const bxOff = Math.cos(angle) * dist * (team === 'player' ? 1 : -1);
+                const byOff = Math.sin(angle) * dist;
+                const bx = this._clamp(gkCatchX + bxOff, 6, 94);
+                const by = this._clamp(gkCatchY + byOff, 12, 88);
+                this._ballOwner = null;
+                this._animBall(bx, by, 360, true);
+                this._applyPush(team, 1);
             }
-        }, 460);
+        }, 470);
     }
 
     _evTackle({ team, x, y }) {

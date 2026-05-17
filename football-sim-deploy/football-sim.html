@@ -62,31 +62,16 @@
             font-family: -apple-system, 'Segoe UI', Arial, sans-serif;
             background: radial-gradient(ellipse 120% 80% at 50% 0%, #0e2a16 0%, #060e08 65%);
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
+            /* No centring/padding — screens now render full-width.
+               body's padding-top (44px) stays so content clears the fixed top bar. */
         }
 
+        /* The .container used to be a centred gold-bordered card. The brand
+           title moved into the top bar, so we drop the frame, padding, and
+           width cap — screens (clubhouse, formation, match, result) now
+           extend edge-to-edge.  */
         .container {
-            background: var(--c-bg-1);
-            border-radius: 12px;
-            border: 1px solid var(--c-border-gold);
-            box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255,215,0,0.06);
-            max-width: 1400px;
-            width: 95%;
-            padding: 28px;
-        }
-
-        h1 {
-            text-align: center;
-            color: var(--c-gold);
-            margin-bottom: 28px;
-            font-size: 26px;
-            font-weight: 900;
-            letter-spacing: 3px;
-            text-transform: uppercase;
-            text-shadow: 0 0 24px var(--c-gold-glow);
+            width: 100%;
         }
 
         /* ── SCREEN SYSTEM ───────────────────────────────────── */
@@ -1510,292 +1495,888 @@
             /* ── Attribute bars: 2 cols ── */
             .attribute-bars { grid-template-columns: repeat(2, 1fr) !important; }
         }
+
+        /* ═══════════════════════════════════════════════════════
+           TOP MENU BAR — fixed floating bar with hamburger
+        ════════════════════════════════════════════════════════ */
+        body { padding-top: 44px; }   /* clear the fixed bar */
+        .top-menu-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 44px;
+            background: rgba(20, 20, 28, 0.92);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255, 215, 0, 0.25);
+            z-index: 100;
+            display: grid;
+            grid-template-columns: 1fr auto 36px;     /* brand · manager · hamburger */
+            align-items: center;
+            gap: 14px;
+            padding: 0 18px;
+            color: #eee;
+            font-family: Arial, sans-serif;
+        }
+        .top-menu-title {
+            font-weight: 800; font-size: 15px; color: #FFD700;
+            letter-spacing: 0.6px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .top-menu-manager {
+            color: #ddd; font-size: 12px; font-weight: 600;
+            text-align: center;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            max-width: 320px;
+        }
+        .top-menu-manager:empty { display: none; }
+        .top-menu-manager .tmm-mgr  { color: #FFD700; font-weight: 700; }
+        .top-menu-manager .tmm-sep  { color: #555; padding: 0 6px; }
+        .top-menu-manager .tmm-club { color: #ddd; }
+        .hamburger-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 215, 0, 0.4);
+            color: #FFD700;
+            font-size: 18px;
+            width: 36px; height: 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+            transition: background 0.15s, color 0.15s;
+        }
+        .hamburger-btn:hover { background: rgba(255, 215, 0, 0.12); }
+        .hamburger-btn[aria-expanded="true"] { background: #FFD700; color: #000; }
+
+        .top-menu-dropdown {
+            position: fixed;
+            top: 44px;
+            right: 8px;
+            min-width: 248px;
+            background: rgba(20, 20, 28, 0.97);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid #333;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+            z-index: 99;
+            padding: 6px 0;
+            color: #eee;
+            font-family: Arial, sans-serif;
+        }
+        .top-menu-item {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: #eee;
+            padding: 10px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: left;
+            font-family: inherit;
+        }
+        .top-menu-item .tm-icon  { width: 22px; font-size: 16px; }
+        .top-menu-item .tm-label { flex: 1; }
+        .top-menu-item .tm-state { color: #FFD700; font-weight: 600; font-size: 12px; }
+        .top-menu-item:hover { background: rgba(255, 215, 0, 0.10); }
+        .top-menu-item:active { background: rgba(255, 215, 0, 0.18); }
+        .top-menu-divider {
+            height: 1px; background: rgba(255, 255, 255, 0.08); margin: 4px 12px;
+        }
+        .top-menu-danger:hover { background: rgba(220, 38, 38, 0.20); color: #FCA5A5; }
+
+        /* History modal (also useful for any future modal) */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0, 0, 0, 0.72);
+            display: none;
+            align-items: center; justify-content: center;
+            z-index: 200;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-card {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            width: 560px;
+            max-height: 80vh;
+            max-width: 92vw;
+            overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+        .modal-head {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px;
+            background: rgba(255, 215, 0, 0.10);
+            border-bottom: 1px solid #333;
+            color: #FFD700; font-weight: 700; font-size: 15px;
+        }
+        .modal-close {
+            background: transparent; border: none; color: #eee;
+            font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px;
+        }
+        .modal-close:hover { color: #FFD700; }
+        .modal-body { padding: 12px 16px; overflow-y: auto; }
+
+        .tm-hist-row {
+            display: grid;
+            grid-template-columns: 26px 64px 1fr auto;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }
+        .tm-hist-row:last-child { border-bottom: none; }
+        .tm-hist-row .tm-result { font-weight: 700; text-align: center; }
+        .tm-hist-row .tm-result.W { color: #22C55E; }
+        .tm-hist-row .tm-result.L { color: #EF4444; }
+        .tm-hist-row .tm-result.D { color: #FACC15; }
+        .tm-hist-row .tm-score    { font-weight: 700; color: #eee; }
+        .tm-hist-row .tm-opponent { color: #ddd; }
+        .tm-hist-row .tm-date     { color: #888; font-size: 11px; }
+        .tm-hist-row .tm-scorers  {
+            grid-column: 2 / -1; color: #aaa; font-size: 11px; margin-top: 2px;
+        }
+        .tm-hist-empty { color: #888; padding: 24px 8px; text-align: center; font-style: italic; }
+
+        /* Clickable history rows */
+        .tm-hist-clickable { cursor: pointer; border-radius: 4px; padding-left: 8px; padding-right: 8px; }
+        .tm-hist-clickable:hover { background: rgba(255, 215, 0, 0.08); }
+        .tm-hist-clickable:focus { outline: 2px solid #FFD700; outline-offset: -2px; }
+
+        /* Match-report detail view */
+        .modal-card-wide { width: 760px; max-width: 95vw; }
+        .modal-card-wide .modal-head { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+        .modal-card-wide .modal-head > span:nth-child(2) { text-align: center; }
+        .tm-back-btn {
+            background: transparent; border: 1px solid rgba(255, 215, 0, 0.35);
+            color: #FFD700; padding: 4px 10px; border-radius: 4px;
+            font-size: 12px; cursor: pointer; font-weight: 600;
+        }
+        .tm-back-btn:hover { background: rgba(255, 215, 0, 0.12); }
+
+        .tm-match-head {
+            display: grid; grid-template-columns: 1fr auto 1fr;
+            align-items: center; gap: 18px;
+            padding: 16px 0 6px; color: #eee;
+        }
+        .tm-match-team { font-size: 17px; font-weight: 700; color: #ddd; text-align: center; }
+        .tm-match-score {
+            text-align: center; font-size: 28px; font-weight: 900; color: #FFD700;
+            display: flex; align-items: center; gap: 12px; justify-content: center;
+        }
+        .tm-result-big {
+            display: inline-block; width: 32px; height: 32px; line-height: 32px;
+            border-radius: 50%; text-align: center; font-size: 16px;
+        }
+        .tm-result-big.W { background: rgba(34, 197, 94, 0.25);  color: #22C55E; }
+        .tm-result-big.L { background: rgba(239, 68, 68, 0.25);  color: #EF4444; }
+        .tm-result-big.D { background: rgba(250, 204, 21, 0.25); color: #FACC15; }
+        .tm-match-sub { text-align: center; color: #888; font-size: 12px; margin-bottom: 12px; }
+
+        .tm-section-head {
+            color: #FFD700; font-size: 12px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.6px; margin: 16px 0 6px;
+            border-bottom: 1px solid rgba(255, 215, 0, 0.2); padding-bottom: 4px;
+        }
+
+        .tm-goal-list { display: flex; flex-direction: column; gap: 4px; }
+        .tm-goal {
+            display: grid; grid-template-columns: 36px 90px 1fr; gap: 8px;
+            align-items: center; font-size: 13px; padding: 4px 0;
+        }
+        .tm-minute { color: #888; font-weight: 700; text-align: right; }
+        .tm-team-tag {
+            display: inline-block; padding: 2px 6px; border-radius: 3px;
+            font-size: 11px; font-weight: 700; text-align: center;
+            background: rgba(255, 255, 255, 0.07);
+        }
+        .tm-team-player { color: #FFD700; }
+        .tm-team-cpu    { color: #93C5FD; }
+        .tm-scorer { color: #ddd; }
+        .tm-assister { color: #888; font-size: 11px; }
+
+        .tm-card-list { display: flex; flex-direction: column; gap: 3px; }
+        .tm-card-row {
+            display: grid; grid-template-columns: 36px 90px 1fr; gap: 8px;
+            font-size: 12px; padding: 3px 0; color: #ddd;
+        }
+
+        .tm-stat-table {
+            margin: 10px 0; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 5px; overflow: hidden;
+        }
+        .tm-stat-head {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            background: rgba(255, 215, 0, 0.08); color: #FFD700;
+            padding: 8px 10px; font-size: 11px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .tm-stat-head > span:nth-child(1) { text-align: left; }
+        .tm-stat-head > span:nth-child(2) { text-align: center; }
+        .tm-stat-head > span:nth-child(3) { text-align: right; }
+        .tm-stat-row {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            padding: 6px 10px; font-size: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .tm-stat-row .tm-stat-num:first-child { text-align: left;  color: #FFD700; font-weight: 700; }
+        .tm-stat-row .tm-stat-num:last-child  { text-align: right; color: #93C5FD; font-weight: 700; }
+        .tm-stat-row .tm-stat-label { text-align: center; color: #aaa; }
+
+        .tm-lineup {
+            margin-top: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 5px; overflow: hidden;
+        }
+        .tm-lineup-head {
+            background: rgba(255, 255, 255, 0.05); padding: 7px 10px;
+            font-size: 13px; font-weight: 700; color: #ddd;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .tm-lineup-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 36px 38px 24px 24px 50px 40px 26px 38px 50px;
+            gap: 4px; align-items: center;
+            padding: 5px 10px; font-size: 11px; color: #ccc;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .tm-lineup-row:first-of-type { border-top: none; }
+        .tm-lineup-head-row {
+            background: rgba(255, 255, 255, 0.03); color: #888; font-size: 10px;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .tm-pl-name { color: #eee; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-pl-pos { color: #888; font-weight: 700; }
+        .tm-pl-cards { font-size: 10px; }
+        .tm-pl-rating { font-weight: 800; text-align: center; padding: 2px 0; border-radius: 3px; }
+        .tm-pl-rating.r-great { background: rgba(34, 197, 94, 0.20);  color: #22C55E; }
+        .tm-pl-rating.r-good  { background: rgba(134, 239, 172, 0.18); color: #86EFAC; }
+        .tm-pl-rating.r-ok    { background: rgba(250, 204, 21, 0.18); color: #FACC15; }
+        .tm-pl-rating.r-poor  { background: rgba(239, 68, 68, 0.18);  color: #EF4444; }
+
+        /* ═══════════════════════════════════════════════════════
+           ONBOARDING — first-run manager profile creation
+        ════════════════════════════════════════════════════════ */
+        .onboarding-overlay {
+            position: fixed; inset: 0;
+            background: rgba(10, 12, 20, 0.95);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            z-index: 1000;   /* above top bar (100) and modal (200) */
+            display: none;
+            align-items: center; justify-content: center;
+            font-family: Arial, sans-serif;
+        }
+        .onboarding-overlay.active { display: flex; }
+        .onboarding-card {
+            background: #1a1a1a;
+            border: 1px solid rgba(255, 215, 0, 0.5);
+            border-radius: 10px;
+            padding: 36px 32px;
+            width: 440px; max-width: 92vw;
+            text-align: center;
+            color: #eee;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+        }
+        .onboarding-emoji { font-size: 44px; margin-bottom: 6px; line-height: 1; }
+        .onboarding-card h2 {
+            margin: 0 0 8px;
+            color: #FFD700;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .onboarding-card p {
+            margin: 0 0 20px; color: #ccc; font-size: 14px; line-height: 1.5;
+        }
+        .onboarding-card input[type=text] {
+            width: 100%;
+            padding: 11px 13px;
+            background: #0e0e0e;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #eee;
+            font-size: 16px;
+            font-family: inherit;
+            box-sizing: border-box;
+            margin-bottom: 16px;
+        }
+        .onboarding-card input[type=text]:focus {
+            outline: none;
+            border-color: #FFD700;
+            box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.18);
+        }
+        .onboarding-cta {
+            background: #FFD700;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            font-weight: 700;
+            font-size: 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            font-family: inherit;
+            transition: background 0.15s;
+        }
+        .onboarding-cta:hover:not(:disabled) { background: #ffcd00; }
+        .onboarding-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+        .onboarding-foot {
+            color: #888; font-size: 11px; margin-top: 14px;
+        }
+
+        /* Multi-step onboarding — only the active step is rendered. */
+        .onboarding-step { display: none; }
+        .onboarding-step.active { display: block; }
+        .onboarding-card-wide { width: 640px; max-width: 95vw; }
+        .onboarding-stepper {
+            position: absolute; top: 12px; right: 16px;
+            color: #888; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .onboarding-card { position: relative; }
+        .onb-row {
+            display: flex; gap: 10px; margin-top: 16px; align-items: stretch;
+        }
+        .onb-row .onb-grow { flex: 1; }
+        .onb-back {
+            background: transparent; border: 1px solid #555; color: #aaa;
+            padding: 12px 16px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; font-family: inherit; font-weight: 600;
+        }
+        .onb-back:hover { background: rgba(255,255,255,0.06); border-color: #777; color: #ddd; }
+
+        /* Nation grid — 11 SEA countries as clickable cards (4 per row). */
+        .nation-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .nation-btn {
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            color: #eee; padding: 14px 8px; font-family: inherit; font-size: 12px;
+            cursor: pointer; display: flex; flex-direction: column; align-items: center;
+            gap: 6px; transition: all 0.12s;
+        }
+        .nation-btn:hover { background: #1a1a1a; border-color: #555; transform: translateY(-1px); }
+        .nation-btn.selected {
+            background: rgba(255,215,0,0.14); border-color: #FFD700;
+            color: #FFD700; font-weight: 700;
+        }
+        .nation-btn .nation-flag { font-size: 28px; line-height: 1; }
+        .nation-btn .nation-name { font-size: 12px; text-align: center; line-height: 1.2; }
+
+        /* City pick — list + map side by side. */
+        .city-pick-grid {
+            display: grid; grid-template-columns: 220px 1fr;
+            gap: 16px; margin-top: 14px;
+        }
+        .city-list {
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            padding: 6px; max-height: 320px; overflow-y: auto;
+        }
+        .city-item {
+            display: block; width: 100%; background: transparent; border: none;
+            color: #eee; padding: 8px 12px; font-size: 13px; cursor: pointer;
+            border-radius: 4px; text-align: left; font-family: inherit;
+        }
+        .city-item:hover { background: rgba(255,255,255,0.05); }
+        .city-item.selected {
+            background: rgba(255,215,0,0.18); color: #FFD700; font-weight: 700;
+        }
+        .city-map {
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            min-height: 320px; padding: 8px; position: relative;
+        }
+        .city-map svg { width: 100%; height: 100%; display: block; }
+        .map-outline { fill: rgba(255,215,0,0.07); stroke: rgba(255,215,0,0.55); stroke-width: 0.5; }
+        .map-city {
+            cursor: pointer; transition: fill 0.12s, r 0.12s;
+        }
+        .map-city .map-dot { fill: #888; stroke: #1a1a1a; stroke-width: 0.4; }
+        .map-city:hover .map-dot { fill: #ddd; }
+        .map-city.selected .map-dot { fill: #FFD700; stroke: #FFA000; stroke-width: 0.5; }
+        .map-city .map-label {
+            font-size: 2.4px; fill: #aaa; pointer-events: none;
+            font-family: Arial, sans-serif;
+        }
+        .map-city.selected .map-label { fill: #FFD700; font-weight: bold; }
+
+        /* League preview table */
+        .league-preview {
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            margin-top: 14px; max-height: 360px; overflow-y: auto;
+        }
+        .league-row {
+            display: grid;
+            grid-template-columns: 26px 18px 1fr 28px 28px 28px 28px 36px 28px;
+            gap: 6px; align-items: center;
+            padding: 8px 12px; font-size: 12px; color: #ddd;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .league-row:first-child { border-top: none; }
+        .league-row.header {
+            background: rgba(255,215,0,0.08); color: #FFD700;
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+            font-weight: 700;
+        }
+        .league-row.user-club {
+            background: rgba(255,215,0,0.10); color: #FFD700; font-weight: 700;
+        }
+        .league-row .lp-crest {
+            display: inline-block; width: 12px; height: 12px;
+            border-radius: 2px; border: 1px solid rgba(255,255,255,0.15);
+        }
+        .league-row .lp-name { text-align: left; }
+        .league-row .lp-num { text-align: center; }
+
+        /* ═══════════════════════════════════════════════════════
+           CLUBHOUSE SCREEN
+        ════════════════════════════════════════════════════════ */
+        #clubhouseScreen { padding: 0; }
+        .clubhouse-grid {
+            display: grid;
+            grid-template-columns: 180px 1fr;          /* slim left menu, wider right pane */
+            min-height: calc(100vh - 110px);
+            background: #0a0a0a;
+        }
+        .clubhouse-menu {
+            background: rgba(20, 20, 28, 0.95);
+            border-right: 1px solid #333;
+            padding: 10px 0;
+            font-family: Arial, sans-serif;
+        }
+        .ch-club-head {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 10px 12px;
+            border-bottom: 1px solid #333;
+            margin-bottom: 6px;
+        }
+        .ch-crest { width: 30px; height: 36px; flex-shrink: 0; }
+        .ch-crest svg { width: 100%; height: 100%; display: block; }
+        .ch-club-text { min-width: 0; }
+        .ch-club-name { color: #FFD700; font-weight: 800; font-size: 12px; line-height: 1.2; }
+        .ch-club-sub  { color: #888; font-size: 10px; margin-top: 2px; }
+        .ch-menu-item {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; background: transparent; border: none;
+            color: #eee; padding: 9px 12px; font-size: 12px; cursor: pointer;
+            text-align: left; font-family: inherit;
+            border-left: 3px solid transparent;
+        }
+        .ch-menu-item:hover { background: rgba(255,215,0,0.08); border-left-color: rgba(255,215,0,0.4); }
+        .ch-menu-item.active { background: rgba(255,215,0,0.12); color: #FFD700; border-left-color: #FFD700; }
+        .ch-menu-item .ch-icon { width: 18px; font-size: 14px; }
+
+        .clubhouse-stage {
+            position: relative;
+            background: linear-gradient(180deg, #0a1428 0%, #1c3960 50%, #0e2a4a 100%);
+            padding: 0;
+            overflow: hidden;
+            display: flex; align-items: stretch; justify-content: stretch;
+        }
+        .ch-view {
+            display: none;
+            width: 100%;
+            position: relative;
+        }
+        .ch-view.active { display: flex; }
+        .ch-view-stadium {
+            align-items: center; justify-content: center; padding: 24px;
+        }
+        .ch-view-table {
+            flex-direction: column;
+            background: rgba(10, 12, 20, 0.65);
+            padding: 18px 24px;
+            overflow: hidden;
+        }
+        .ch-view-head {
+            color: #FFD700;
+            font-size: 18px; font-weight: 800; letter-spacing: 0.4px;
+            display: flex; align-items: center; gap: 10px;
+            padding: 4px 0 14px;
+            border-bottom: 1px solid rgba(255,215,0,0.25);
+        }
+        .ch-view-body {
+            margin-top: 12px;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .ch-stadium { width: 100%; max-width: 760px; height: 460px; max-height: 70vh; }
+        .ch-stadium svg { width: 100%; height: 100%; display: block; }
+        .ch-banner {
+            position: absolute; bottom: 28px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 10, 18, 0.82);
+            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+            border: 1px solid rgba(255,215,0,0.35);
+            border-radius: 8px;
+            padding: 12px 24px; text-align: center;
+            font-family: Arial, sans-serif;
+        }
+        .ch-banner-tag {
+            color: #aaa; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+        }
+        .ch-banner-name {
+            color: #FFD700; font-size: 22px; font-weight: 900; letter-spacing: 0.4px;
+            margin-top: 2px;
+        }
+        .ch-banner-sub  { color: #ddd; font-size: 12px; margin-top: 2px; }
+
+        /* Fixtures (inline) — grouped by round */
+        .ch-fix-round {
+            margin-bottom: 14px;
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            overflow: hidden;
+        }
+        .ch-fix-round-head {
+            background: rgba(255,215,0,0.10); color: #FFD700;
+            padding: 8px 14px; font-size: 12px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .ch-fix-match {
+            display: grid;
+            grid-template-columns: 1fr 80px 1fr;
+            gap: 10px; align-items: center;
+            padding: 8px 14px; font-size: 13px; color: #ddd;
+            border-top: 1px solid rgba(255,255,255,0.04);
+        }
+        .ch-fix-match:first-of-type { border-top: none; }
+        .ch-fix-match .ch-fix-home { text-align: right; }
+        .ch-fix-match .ch-fix-vs   { text-align: center; color: #888; font-weight: 700; font-size: 11px; }
+        .ch-fix-match .ch-fix-away { text-align: left; }
+        .ch-fix-match.user-club { background: rgba(255,215,0,0.08); color: #FFD700; }
+        .ch-fix-match.played .ch-fix-vs { color: #FFD700; font-size: 14px; }
+
+        /* Tactics view — host for the relocated management UI. */
+        .ch-view-tactics {
+            padding: 14px 18px 18px;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        /* When the management content is reparented under #chTacticsHost its
+           own outer wrapper is gone, so the inner grid needs the right height
+           context to scroll. */
+        #chTacticsHost {
+            flex: 1; min-height: 0;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        /* Tighten the relocated management title for the slimmer pane */
+        #chTacticsHost #managementTitle {
+            font-size: 16px !important;
+            letter-spacing: 1.6px !important;
+        }
+        #chTacticsHost #managementCrest svg { width: 38px !important; height: 46px !important; }
+        #chTacticsHost > div:first-child { margin-bottom: 10px !important; }
+
+        /* ── Squad view (clubhouse right pane) ────────────────────────── */
+        .ch-view-squad { padding: 18px 24px; flex-direction: column; }
+        .ch-squad-stage {
+            position: relative;            /* anchor for the absolute detail */
+            flex: 1; min-height: 0;
+            margin-top: 12px;
+        }
+        .ch-squad-list {
+            background: #0e0e0e;
+            border: 1px solid #333;
+            border-radius: 6px;
+            overflow-y: auto;
+            padding: 4px;
+            height: 100%;
+        }
+        .ch-squad-row {
+            display: grid;
+            grid-template-columns: 28px 28px 1fr 64px 36px;
+            gap: 8px;
+            align-items: center;
+            padding: 7px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #ddd;
+            font-size: 12px;
+            border: 1px solid transparent;
+        }
+        .ch-squad-row:hover { background: rgba(255,255,255,0.04); }
+        .ch-squad-row.selected {
+            background: rgba(255,215,0,0.10);
+            border-color: rgba(255,215,0,0.45);
+        }
+        .ch-squad-row .csr-num    { color: #888; font-weight: 700; text-align: right; }
+        .ch-squad-row .csr-avatar {
+            width: 28px; height: 28px;
+            border-radius: 50%; overflow: hidden; background: #1a1a1a;
+            border: 1px solid #333;
+        }
+        .ch-squad-row .csr-avatar svg { width: 100%; height: 100%; display: block; }
+        .ch-squad-row .csr-name   { color: #eee; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ch-squad-row .csr-flag   { font-size: 10px; color: #888; font-weight: 400; margin-left: 4px; }
+        .ch-squad-row .csr-pos    { color: #aaa; font-size: 11px; text-align: center; }
+        .ch-squad-row .csr-ovr    {
+            text-align: center; font-weight: 800; font-size: 13px;
+            border-radius: 4px; padding: 2px 0;
+        }
+        .ch-squad-section-head {
+            color: #FFD700; font-size: 10px; text-transform: uppercase;
+            letter-spacing: 0.7px; font-weight: 700;
+            padding: 10px 12px 4px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .ch-squad-section-head:first-child { border-top: none; }
+
+        /* Detail overlay — covers the squad list inside the right pane. */
+        .ch-squad-detail {
+            position: absolute; inset: 0;
+            background: #0e0e0e;
+            border: 1px solid rgba(255,215,0,0.4);
+            border-radius: 6px;
+            padding: 22px 22px 18px;
+            overflow-y: auto;
+            box-shadow: 0 -2px 18px rgba(0,0,0,0.55);
+            transform: translateY(8px);
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+        }
+        .ch-squad-detail.active {
+            transform: translateY(0);
+            opacity: 1; pointer-events: auto;
+        }
+        .ch-squad-close {
+            position: absolute; top: 8px; right: 10px;
+            background: transparent; border: none;
+            color: #ccc; font-size: 26px; line-height: 1;
+            cursor: pointer; padding: 2px 6px;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+        }
+        .ch-squad-close:hover { color: #FFD700; background: rgba(255,215,0,0.10); }
+        .ch-squad-detail-inner { padding-right: 28px; }   /* leave room for the × button */
+        .ch-detail-head {
+            display: flex; gap: 14px; align-items: flex-start;
+            padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .ch-detail-avatar {
+            width: 84px; height: 84px; flex-shrink: 0;
+            border-radius: 8px; overflow: hidden;
+            background: #1a1a1a; border: 1px solid #333;
+        }
+        .ch-detail-avatar svg { width: 100%; height: 100%; display: block; }
+        .ch-detail-titles { min-width: 0; flex: 1; }
+        .ch-detail-name {
+            color: #FFD700; font-size: 18px; font-weight: 800; line-height: 1.2;
+        }
+        .ch-detail-pos {
+            color: #ddd; font-size: 12px; margin-top: 4px;
+        }
+        .ch-detail-pos .ch-ovr {
+            display: inline-block; margin-left: 8px;
+            padding: 2px 8px; border-radius: 4px;
+            font-size: 13px; font-weight: 800;
+        }
+        .ch-detail-bio { color: #aaa; font-size: 11px; margin-top: 4px; }
+
+        .ch-detail-section {
+            margin-top: 14px;
+        }
+        .ch-detail-section-head {
+            color: #FFD700; font-size: 10px; text-transform: uppercase;
+            letter-spacing: 0.6px; font-weight: 700; margin-bottom: 6px;
+        }
+        .ch-attr-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 16px;
+        }
+        .ch-attr-row {
+            display: grid; grid-template-columns: 88px 1fr 26px;
+            gap: 6px; align-items: center;
+            font-size: 11px; color: #ccc;
+            padding: 2px 0;
+        }
+        .ch-attr-bar {
+            height: 5px; background: #2a2a2a; border-radius: 2px; overflow: hidden;
+        }
+        .ch-attr-bar > div { height: 100%; border-radius: 2px; }
+        .ch-attr-val { font-weight: 700; text-align: right; color: #ddd; }
+
+        /* Position pills + form row in the detail overlay */
+        .ch-pos-list { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ch-pos-pill {
+            display: inline-block; padding: 3px 9px;
+            border-radius: 11px; background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
+            color: #ddd; font-size: 11px; font-weight: 600;
+        }
+        .ch-pos-pill.ch-pos-natural {
+            background: rgba(255,215,0,0.15);
+            border-color: rgba(255,215,0,0.45);
+            color: #FFD700;
+        }
+        .ch-form-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+        /* OVR colour scale (mirrors _overallColor) */
+        .ovr-90 { background: rgba(192,132,252,0.22); color: #C084FC; }
+        .ovr-80 { background: rgba(34,197,94,0.22);  color: #16A34A; }
+        .ovr-70 { background: rgba(134,239,172,0.22); color: #86EFAC; }
+        .ovr-60 { background: rgba(160,160,160,0.22); color: #A0A0A0; }
+        .ovr-50 { background: rgba(250,204,21,0.22); color: #FACC15; }
+        .ovr-40 { background: rgba(239,68,68,0.22);  color: #EF4444; }
+
+        /* ── Floating bottom nav (back / forward) ─────────────────────── */
+        .floating-nav {
+            position: fixed;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 90;
+            display: flex; align-items: center; gap: 6px;
+            background: rgba(20, 20, 28, 0.92);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,215,0,0.35);
+            border-radius: 22px;
+            padding: 4px 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+            font-family: Arial, sans-serif;
+        }
+        .floating-nav .fn-btn {
+            background: transparent;
+            border: none;
+            color: #FFD700;
+            width: 32px; height: 30px;
+            border-radius: 16px;
+            font-size: 18px; line-height: 1;
+            cursor: pointer; font-weight: 800;
+            font-family: inherit;
+        }
+        .floating-nav .fn-btn:hover:not(:disabled) { background: rgba(255,215,0,0.15); }
+        .floating-nav .fn-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+        .floating-nav .fn-label {
+            color: #ddd; font-size: 11px; padding: 0 6px;
+            max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
+    <!-- Screen partials are loaded from screens/<name>.html and injected into
+         the [data-screen] placeholders below. football-sim.js's bootstrap
+         waits for the 'screensReady' event before calling getElementById on
+         injected nodes. -->
+    <script src="screens/screen-loader.js"></script>
 </head>
 <body>
+    <!-- Top floating menu bar (always visible) -->
+    <div class="top-menu-bar" id="topMenuBar">
+        <div class="top-menu-title">⚽ Football Match Simulator</div>
+        <div class="top-menu-manager" id="topMenuManager"><!-- manager + club label --></div>
+        <button class="hamburger-btn" id="hamburgerBtn"
+                aria-label="Open menu" aria-expanded="false" title="Menu">☰</button>
+    </div>
+    <div class="top-menu-dropdown" id="topMenuDropdown" style="display:none">
+        <button class="top-menu-item" data-menu-action="toggle-sound">
+            <span class="tm-icon">🔊</span><span class="tm-label">Sound</span>
+            <span class="tm-state" id="tmSoundState">On</span>
+        </button>
+        <button class="top-menu-item" data-menu-action="cycle-speed">
+            <span class="tm-icon">⚡</span><span class="tm-label">Match speed</span>
+            <span class="tm-state" id="tmSpeedState">Fast</span>
+        </button>
+        <button class="top-menu-item" data-menu-action="toggle-debug">
+            <span class="tm-icon">🐛</span><span class="tm-label">Debug overlay</span>
+            <span class="tm-state" id="tmDebugState">Off</span>
+        </button>
+        <div class="top-menu-divider"></div>
+        <button class="top-menu-item" data-menu-action="show-history">
+            <span class="tm-icon">📜</span><span class="tm-label">Match history</span>
+        </button>
+        <button class="top-menu-item top-menu-danger" data-menu-action="reset-career">
+            <span class="tm-icon">🔄</span><span class="tm-label">Reset career</span>
+        </button>
+    </div>
+
+    <!-- Onboarding overlay — multi-step wizard shown when no career exists.
+         Steps: 1) name · 2) nation · 3) city + map · 4) league preview.
+         Only the active step has .active; football-sim.js drives transitions. -->
+    <div class="onboarding-overlay" id="onboardingOverlay" aria-hidden="true">
+
+        <!-- Step 1 — Manager name -->
+        <div class="onboarding-card onboarding-step active" data-step="name" role="dialog" aria-labelledby="onb1Title">
+            <div class="onboarding-stepper">Step 1 of 4</div>
+            <div class="onboarding-emoji">⚽</div>
+            <h2 id="onb1Title">Welcome, manager</h2>
+            <p>What name should we put on your tracksuit?<br>
+               Every squad, tactic, and result will be linked to this profile.</p>
+            <input type="text" id="onboardingNameInput"
+                   placeholder="Your manager name" maxlength="32"
+                   autocomplete="off" spellcheck="false" />
+            <button id="onboardingNextBtn" class="onboarding-cta" disabled>Continue →</button>
+            <div class="onboarding-foot">You can reset this anytime from the ☰ menu.</div>
+        </div>
+
+        <!-- Step 2 — Nation pick (11 SEA nations) -->
+        <div class="onboarding-card onboarding-card-wide onboarding-step" data-step="nation" role="dialog">
+            <div class="onboarding-stepper">Step 2 of 4</div>
+            <h2>Pick your nation</h2>
+            <p>Choose where to base your managerial career. We have 11 Southeast Asia nations on the map.</p>
+            <div class="nation-grid" id="nationGrid"></div>
+            <div class="onb-row">
+                <button class="onb-back" data-onb-back="name">← Back</button>
+                <button class="onboarding-cta onb-grow" id="nationNextBtn" disabled>Continue →</button>
+            </div>
+        </div>
+
+        <!-- Step 3 — City + interactive country map -->
+        <div class="onboarding-card onboarding-card-wide onboarding-step" data-step="city" role="dialog">
+            <div class="onboarding-stepper">Step 3 of 4</div>
+            <h2 id="cityStepTitle">Pick your home city</h2>
+            <p>Where will your club call home? Click a city in the list or directly on the map.</p>
+            <div class="city-pick-grid">
+                <div class="city-list" id="cityList"></div>
+                <div class="city-map">
+                    <svg id="countryMap" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+            </div>
+            <div class="onb-row">
+                <button class="onb-back" data-onb-back="nation">← Back</button>
+                <button class="onboarding-cta onb-grow" id="cityNextBtn" disabled>Generate league →</button>
+            </div>
+        </div>
+
+        <!-- Step 4 — League preview + confirm -->
+        <div class="onboarding-card onboarding-card-wide onboarding-step" data-step="league" role="dialog">
+            <div class="onboarding-stepper">Step 4 of 4</div>
+            <h2>Your league</h2>
+            <p id="leagueIntro">Here are the 10 clubs you'll be competing with this season. Yours is highlighted.</p>
+            <div class="league-preview" id="leaguePreview"></div>
+            <div class="onb-row">
+                <button class="onb-back" data-onb-back="city">← Back</button>
+                <button class="onboarding-cta onb-grow" id="leagueConfirmBtn">Enter Clubhouse →</button>
+            </div>
+        </div>
+
+    </div>
+
     <!-- Phaser canvas — small spinning football pinned to the top-right corner,
          proves the Phaser integration is alive without touching the match engine. -->
-    <div id="phaserBadge" style="position: fixed; top: 8px; right: 8px; width: 40px; height: 40px; z-index: 999; pointer-events: none;"></div>
-    <div class="container">
-        <h1>⚽ Football Match Simulator</h1>
+    <div id="phaserBadge" style="position: fixed; top: 52px; right: 8px; width: 40px; height: 40px; z-index: 999; pointer-events: none;"></div>
 
+    <!-- Floating nav (back / forward) — pill pinned to the bottom-centre.
+         Driven by football-sim.js's navigation stack. -->
+    <div class="floating-nav" id="floatingNav" aria-label="Navigation history">
+        <button id="navBackBtn" class="fn-btn" disabled aria-label="Back" title="Back">‹</button>
+        <span class="fn-label" id="navLabel">—</span>
+        <button id="navFwdBtn"  class="fn-btn" disabled aria-label="Forward" title="Forward">›</button>
+    </div>
+    <div class="container">
+        <!-- Title moved into the top menu bar. Screens render full-width. -->
         <!-- Formation Selection Screen -->
-        <div class="screen" id="formationScreen">
-            <h2 style="text-align: center; margin-bottom: 20px; color: #666;">Choose Your Formation</h2>
-            <div class="formations">
-                <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)">
-                    4-4-2
-                    <div class="formation-desc">Balanced</div>
-                </button>
-                <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)">
-                    4-3-3
-                    <div class="formation-desc">Offensive</div>
-                </button>
-                <button class="formation-btn" data-formation="451" onclick="window.game.selectFormation(this)">
-                    4-5-1
-                    <div class="formation-desc">Midfield</div>
-                </button>
-                <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)">
-                    5-3-2
-                    <div class="formation-desc">Defensive</div>
-                </button>
-                <button class="formation-btn" data-formation="541" onclick="window.game.selectFormation(this)">
-                    5-4-1
-                    <div class="formation-desc">Ultra Def</div>
-                </button>
-                <button class="formation-btn" data-formation="352" onclick="window.game.selectFormation(this)">
-                    3-5-2
-                    <div class="formation-desc">Mid Power</div>
-                </button>
-                <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)">
-                    3-4-3
-                    <div class="formation-desc">Attack</div>
-                </button>
-            </div>
-            <div class="buttons">
-                <button class="btn-primary" id="startBtn" disabled onclick="window.game.startMatch();">Start Match</button>
-            </div>
-        </div>
+        <!-- formationScreen — partial loaded from screens/formationScreen.html by screen-loader.js -->
+        <div data-screen="formationScreen"></div>
 
         <!-- Match Screen -->
-        <div class="screen" id="matchScreen">
-            <div class="match-header">
-                <div class="match-team" id="playerTeamDisplay"></div>
-                <div class="match-center">
-                    <div class="timer" id="timer">1:00</div>
-                    <div class="score-display"><span id="playerScore">0</span> - <span id="cpuScore">0</span></div>
-                </div>
-                <div class="match-team match-team-right" id="cpuTeamDisplay"></div>
-            </div>
-
-            <div class="match-content">
-                <!-- Pitch Visualization -->
-                <div class="pitch-container">
-                    <div id="pitchSVG"></div>
-
-                    <!-- Dramatic SVG overlay: red card / disallowed goal / penalty award /
-                         injury / goal flash. Mounted by DramaticOverlay; sits between the
-                         Phaser canvas and the celebration screen. -->
-                    <div id="dramaticOverlay" class="dramatic-overlay" style="display:none;"></div>
-
-                    <!-- Debug overlay: triple-click the match clock to toggle.
-                         Renders a 5×3 grid of zones (5 vertical bands × 3 lateral lanes).
-                         Each cell shows both teams' combined player strength in that zone. -->
-                    <div id="debugOverlay" class="debug-overlay" style="display:none;"></div>
-                    <div id="celebrationScreen" style="display:none; position:absolute; inset:0;">
-                        <div class="cel-wrap">
-                            <!-- Stadium background SVG -->
-                            <svg class="cel-stadium-bg" viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
-                                <defs>
-                                    <linearGradient id="cSky" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%"   stop-color="#010210"/>
-                                        <stop offset="55%"  stop-color="#0b1235"/>
-                                        <stop offset="100%" stop-color="#111e55"/>
-                                    </linearGradient>
-                                    <linearGradient id="cPitch" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%"   stop-color="#1b640f"/>
-                                        <stop offset="100%" stop-color="#2d9618"/>
-                                    </linearGradient>
-                                    <radialGradient id="cGl1" cx="0.09" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
-                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
-                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
-                                    </radialGradient>
-                                    <radialGradient id="cGl2" cx="0.91" cy="0.28" r="0.52" gradientUnits="objectBoundingBox">
-                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.42"/>
-                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
-                                    </radialGradient>
-                                    <radialGradient id="cGlPitch" cx="0.5" cy="0.3" r="0.6" gradientUnits="objectBoundingBox">
-                                        <stop offset="0%"   stop-color="#fffde0" stop-opacity="0.08"/>
-                                        <stop offset="100%" stop-color="#fffde0" stop-opacity="0"/>
-                                    </radialGradient>
-                                </defs>
-                                <rect width="900" height="560" fill="url(#cSky)"/>
-                                <rect width="900" height="560" fill="url(#cGl1)"/>
-                                <rect width="900" height="560" fill="url(#cGl2)"/>
-                                <circle cx="82"  cy="18"  r="1.2" fill="white" opacity="0.75"/>
-                                <circle cx="155" cy="32"  r="0.8" fill="white" opacity="0.55"/>
-                                <circle cx="228" cy="15"  r="1.1" fill="white" opacity="0.8"/>
-                                <circle cx="312" cy="28"  r="0.7" fill="white" opacity="0.45"/>
-                                <circle cx="398" cy="11"  r="1.3" fill="white" opacity="0.65"/>
-                                <circle cx="488" cy="24"  r="0.9" fill="white" opacity="0.7"/>
-                                <circle cx="574" cy="9"   r="1.1" fill="white" opacity="0.55"/>
-                                <circle cx="658" cy="31"  r="0.8" fill="white" opacity="0.6"/>
-                                <circle cx="742" cy="17"  r="1.3" fill="white" opacity="0.8"/>
-                                <circle cx="823" cy="27"  r="0.9" fill="white" opacity="0.55"/>
-                                <circle cx="128" cy="52"  r="0.7" fill="white" opacity="0.4"/>
-                                <circle cx="272" cy="46"  r="0.9" fill="white" opacity="0.5"/>
-                                <circle cx="700" cy="40"  r="0.8" fill="white" opacity="0.45"/>
-                                <circle cx="860" cy="14"  r="1"   fill="white" opacity="0.6"/>
-                                <circle cx="44"  cy="42"  r="0.7" fill="white" opacity="0.4"/>
-                                <rect x="0"  y="36"  width="900" height="158" fill="#0e1132"/>
-                                <rect x="0"  y="36"  width="900" height="17"  fill="#15184e"/>
-                                <rect x="0"  y="53"  width="900" height="15"  fill="#121448"/>
-                                <rect x="0"  y="68"  width="900" height="15"  fill="#101242"/>
-                                <rect x="0"  y="83"  width="900" height="14"  fill="#0e103e"/>
-                                <rect x="0"  y="97"  width="900" height="14"  fill="#0c0e3a"/>
-                                <rect x="0"  y="111" width="900" height="13"  fill="#0b0c35"/>
-                                <rect x="0"  y="124" width="900" height="13"  fill="#090b31"/>
-                                <rect x="0"  y="137" width="900" height="14"  fill="#08092e"/>
-                                <rect x="0"  y="151" width="900" height="14"  fill="#07082b"/>
-                                <rect x="0"  y="165" width="900" height="17"  fill="#060728"/>
-                                <rect x="38"  y="42"  width="105" height="58" fill="#8B0000" opacity="0.55"/>
-                                <rect x="148" y="42"  width="78"  height="58" fill="#ffffff" opacity="0.17"/>
-                                <rect x="232" y="42"  width="115" height="58" fill="#003380" opacity="0.52"/>
-                                <rect x="352" y="42"  width="88"  height="58" fill="#CC0000" opacity="0.45"/>
-                                <rect x="446" y="42"  width="108" height="58" fill="#FFD700" opacity="0.22"/>
-                                <rect x="560" y="42"  width="78"  height="58" fill="#003380" opacity="0.48"/>
-                                <rect x="645" y="42"  width="115" height="58" fill="#8B0000" opacity="0.5"/>
-                                <rect x="766" y="42"  width="88"  height="58" fill="#ffffff" opacity="0.14"/>
-                                <path d="M0,185 Q9,178 18,185 Q27,178 36,185 Q45,178 54,185 Q63,178 72,185 Q81,178 90,185 Q99,178 108,185 Q117,178 126,185 Q135,178 144,185 Q153,178 162,185 Q171,178 180,185 Q189,178 198,185 Q207,178 216,185 Q225,178 234,185 Q243,178 252,185 Q261,178 270,185 Q279,178 288,185 Q297,178 306,185 Q315,178 324,185 Q333,178 342,185 Q351,178 360,185 Q369,178 378,185 Q387,178 396,185 Q405,178 414,185 Q423,178 432,185 Q441,178 450,185 Q459,178 468,185 Q477,178 486,185 Q495,178 504,185 Q513,178 522,185 Q531,178 540,185 Q549,178 558,185 Q567,178 576,185 Q585,178 594,185 Q603,178 612,185 Q621,178 630,185 Q639,178 648,185 Q657,178 666,185 Q675,178 684,185 Q693,178 702,185 Q711,178 720,185 Q729,178 738,185 Q747,178 756,185 Q765,178 774,185 Q783,178 792,185 Q801,178 810,185 Q819,178 828,185 Q837,178 846,185 Q855,178 864,185 Q873,178 882,185 Q891,178 900,185 L900,560 L0,560 Z" fill="#0c0c2e"/>
-                                <rect x="28" y="185" width="844" height="108" fill="#09092a"/>
-                                <rect x="24" y="185" width="852" height="14"  fill="#131540"/>
-                                <rect x="20" y="199" width="860" height="14"  fill="#10123a"/>
-                                <rect x="15" y="213" width="870" height="13"  fill="#0d0f34"/>
-                                <rect x="10" y="226" width="880" height="14"  fill="#0b0c2e"/>
-                                <rect x="5"  y="240" width="890" height="13"  fill="#090a29"/>
-                                <rect x="0"  y="253" width="900" height="14"  fill="#070822"/>
-                                <rect x="0"  y="267" width="900" height="16"  fill="#06061e"/>
-                                <rect x="28"  y="191" width="128" height="88" fill="#CC0000"  opacity="0.48"/>
-                                <rect x="162" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.14"/>
-                                <rect x="266" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
-                                <rect x="410" y="191" width="88"  height="88" fill="#FFD700"  opacity="0.2"/>
-                                <rect x="504" y="191" width="138" height="88" fill="#001199"  opacity="0.48"/>
-                                <rect x="648" y="191" width="98"  height="88" fill="#ffffff"  opacity="0.13"/>
-                                <rect x="752" y="191" width="118" height="88" fill="#CC0000"  opacity="0.46"/>
-                                <path d="M0,282 Q7,276 14,282 Q21,276 28,282 Q35,276 42,282 Q49,276 56,282 Q63,276 70,282 Q77,276 84,282 Q91,276 98,282 Q105,276 112,282 Q119,276 126,282 Q133,276 140,282 Q147,276 154,282 Q161,276 168,282 Q175,276 182,282 Q189,276 196,282 Q203,276 210,282 Q217,276 224,282 Q231,276 238,282 Q245,276 252,282 Q259,276 266,282 Q273,276 280,282 Q287,276 294,282 Q301,276 308,282 Q315,276 322,282 Q329,276 336,282 Q343,276 350,282 Q357,276 364,282 Q371,276 378,282 Q385,276 392,282 Q399,276 406,282 Q413,276 420,282 Q427,276 434,282 Q441,276 448,282 Q455,276 462,282 Q469,276 476,282 Q483,276 490,282 Q497,276 504,282 Q511,276 518,282 Q525,276 532,282 Q539,276 546,282 Q553,276 560,282 Q567,276 574,282 Q581,276 588,282 Q595,276 602,282 Q609,276 616,282 Q623,276 630,282 Q637,276 644,282 Q651,276 658,282 Q665,276 672,282 Q679,276 686,282 Q693,276 700,282 Q707,276 714,282 Q721,276 728,282 Q735,276 742,282 Q749,276 756,282 Q763,276 770,282 Q777,276 784,282 Q791,276 798,282 Q805,276 812,282 Q819,276 826,282 Q833,276 840,282 Q847,276 854,282 Q861,276 868,282 Q875,276 882,282 Q889,276 896,282 L900,282 L900,560 L0,560 Z" fill="#07071e"/>
-                                <rect x="0" y="292" width="900" height="24" fill="#060618"/>
-                                <rect x="4"   y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
-                                <rect x="98"  y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
-                                <rect x="192" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
-                                <rect x="286" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
-                                <rect x="380" y="295" width="90"  height="18" fill="#FFD700"   rx="2"/>
-                                <rect x="474" y="295" width="90"  height="18" fill="#CC0000"   rx="2"/>
-                                <rect x="568" y="295" width="90"  height="18" fill="#0033AA"   rx="2"/>
-                                <rect x="662" y="295" width="90"  height="18" fill="#FF6600"   rx="2"/>
-                                <rect x="756" y="295" width="90"  height="18" fill="#008800"   rx="2"/>
-                                <rect x="850" y="295" width="46"  height="18" fill="#FFD700"   rx="2"/>
-                                <rect x="0" y="316" width="900" height="244" fill="url(#cPitch)"/>
-                                <rect x="0"   y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="160" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="320" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="480" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="640" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="800" y="316" width="80" height="244" fill="rgba(255,255,255,0.04)"/>
-                                <rect x="0" y="316" width="900" height="244" fill="url(#cGlPitch)"/>
-                                <rect x="306" y="234" width="288" height="83" fill="rgba(255,255,255,0.035)"/>
-                                <line x1="335" y1="237" x2="335" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="364" y1="237" x2="364" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="393" y1="237" x2="393" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="422" y1="237" x2="422" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="451" y1="237" x2="451" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="480" y1="237" x2="480" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="509" y1="237" x2="509" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="538" y1="237" x2="538" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="567" y1="237" x2="567" y2="316" stroke="rgba(255,255,255,0.18)" stroke-width="0.7"/>
-                                <line x1="306" y1="257" x2="594" y2="257" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
-                                <line x1="306" y1="277" x2="594" y2="277" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
-                                <line x1="306" y1="297" x2="594" y2="297" stroke="rgba(255,255,255,0.14)" stroke-width="0.6"/>
-                                <rect x="305" y="232" width="7" height="86" fill="white"/>
-                                <rect x="588" y="232" width="7" height="86" fill="white"/>
-                                <rect x="305" y="229" width="290" height="7" fill="white"/>
-                                <rect x="313" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
-                                <rect x="588" y="234" width="3" height="82" fill="rgba(0,0,0,0.25)"/>
-                                <ellipse cx="450" cy="286" rx="34" ry="32" fill="rgba(255,215,80,0.35)"/>
-                                <ellipse cx="450" cy="286" rx="20" ry="19" fill="rgba(255,240,150,0.65)"/>
-                                <circle  cx="450" cy="286" r="12" fill="white" opacity="0.94"/>
-                                <circle  cx="450" cy="286" r="12" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>
-                                <path    d="M445,279 L455,279 L459,286 L455,293 L445,293 L441,286 Z" fill="rgba(0,0,0,0.22)"/>
-                                <line x1="0" y1="316" x2="900" y2="316" stroke="white" stroke-width="2.5"/>
-                                <line x1="216" y1="316" x2="198" y2="435" stroke="white" stroke-width="1.8"/>
-                                <line x1="684" y1="316" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
-                                <line x1="198" y1="435" x2="702" y2="435" stroke="white" stroke-width="1.8"/>
-                                <line x1="352" y1="316" x2="342" y2="368" stroke="white" stroke-width="1.4"/>
-                                <line x1="548" y1="316" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
-                                <line x1="342" y1="368" x2="558" y2="368" stroke="white" stroke-width="1.4"/>
-                                <circle cx="450" cy="388" r="4.5" fill="white"/>
-                                <path d="M388,435 Q450,398 512,435" stroke="white" fill="none" stroke-width="1.8"/>
-                                <rect x="23" y="0"  width="10" height="240" fill="#252545"/>
-                                <rect x="19" y="0"  width="18" height="9"   fill="#35355a"/>
-                                <rect x="11" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
-                                <ellipse cx="28" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
-                                <ellipse cx="28" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
-                                <polygon points="12,20 45,20 520,318 0,318" fill="rgba(255,255,200,0.035)"/>
-                                <rect x="867" y="0"  width="10" height="240" fill="#252545"/>
-                                <rect x="863" y="0"  width="18" height="9"   fill="#35355a"/>
-                                <rect x="855" y="4"  width="34" height="15"  fill="#44446a" rx="3"/>
-                                <ellipse cx="872" cy="11" rx="23" ry="8" fill="rgba(255,255,210,0.72)"/>
-                                <ellipse cx="872" cy="11" rx="13" ry="5" fill="rgba(255,255,235,0.9)"/>
-                                <polygon points="855,20 888,20 900,318 380,318" fill="rgba(255,255,200,0.035)"/>
-                                <ellipse cx="450" cy="400" rx="420" ry="110" fill="rgba(255,255,200,0.05)"/>
-                            </svg>
-                            <!-- Canvas confetti -->
-                            <canvas id="celCanvas" class="cel-canvas"></canvas>
-                            <!-- GOAL! banner -->
-                            <div class="cel-goal-banner">
-                                <span class="cel-goal-word">⚽ GOAL! ⚽</span>
-                                <div class="cel-score-row">
-                                    <span class="cel-score-club" id="celPlayerName">—</span>
-                                    <span class="cel-score-num"  id="celScoreLine">0 - 0</span>
-                                    <span class="cel-score-club" id="celCpuName">—</span>
-                                </div>
-                            </div>
-                            <!-- Players on pitch -->
-                            <div class="cel-stage">
-                                <div class="cel-player-row">
-                                    <div id="celMatesLeft"  class="cel-mates-group"></div>
-                                    <div id="celScorerWrap"></div>
-                                    <div id="celMatesRight" class="cel-mates-group"></div>
-                                </div>
-                                <div class="cel-pitch-shadow"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right Sidebar: Events, Formation, Stats -->
-                <div class="match-sidebar">
-                    <div class="event-log-filter">
-                        <button class="event-log-filter-btn active" data-filter="all" onclick="window.game.setEventLogFilter('all')">All</button>
-                        <button class="event-log-filter-btn" data-filter="important" onclick="window.game.setEventLogFilter('important')">Important</button>
-                        <button class="event-log-filter-btn" data-filter="critical" onclick="window.game.setEventLogFilter('critical')">Critical</button>
-                    </div>
-                    <div class="events-log" id="eventsLog">
-                        <div class="event pass event-pri-low">⚪ Match started! Possession: 50-50</div>
-                    </div>
-
-                    <div class="stats" id="stats">
-                        <div class="stat">
-                            <div class="stat-label">Shots on Target</div>
-                            <div class="stat-value"><span id="playerShots">0</span>-<span id="cpuShots">0</span></div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-label">Possession</div>
-                            <div class="stat-value"><span id="playerPoss">50</span>%-<span id="cpuPoss">50</span>%</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-label">Tackles</div>
-                            <div class="stat-value"><span id="playerTackles">0</span>-<span id="cpuTackles">0</span></div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-label">Passes</div>
-                            <div class="stat-value"><span id="playerPasses">0</span>-<span id="cpuPasses">0</span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="buttons">
-                <div class="speed-controls" id="speedControls">
-                    <button class="btn-secondary speed-btn" data-speed="slow">🐢 Slow</button>
-                    <button class="btn-secondary speed-btn" data-speed="normal">▶️ Normal</button>
-                    <button class="btn-secondary speed-btn active" data-speed="fast">⚡ Fast</button>
-                </div>
-                <button class="btn-secondary mute-btn" id="muteBtn" title="Mute sounds" aria-label="Mute sounds">🔊</button>
-                <button class="btn-secondary" id="pauseBtn">Pause</button>
-                <button class="btn-secondary" id="manageBtn" style="display: none;">Manage Team</button>
-                <button class="btn-primary" id="endBtn" style="display: none;">Match Ended</button>
-            </div>
-        </div>
+        <!-- matchScreen — partial loaded from screens/matchScreen.html by screen-loader.js -->
+        <div data-screen="matchScreen"></div>
 
         <!-- [celebration moved inside .pitch-container] -->
         <div style="display:none;">
@@ -2037,187 +2618,15 @@
         </div>
 
         <!-- Management Panel Screen -->
-        <div class="screen active" id="managementScreen" style="flex-direction: column; height: 100%; overflow: hidden; padding: 20px;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 15px; flex-shrink: 0;">
-                <div id="managementCrest"></div>
-                <h2 style="text-align: center; color: #FFD700; text-transform: uppercase; font-size: 22px; letter-spacing: 3px; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); margin: 0;" id="managementTitle">⚽ TEAM CONTROL ⚽</h2>
-            </div>
-
-            <!-- Mobile-only player detail panel (shown between title and squad lists) -->
-            <div id="mobilePlayerDetail"></div>
-
-            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px; flex: 1; overflow: hidden; min-height: 0;" id="mgmtMainGrid">
-                <!-- LEFT (1/3): PLAYER LIST -->
-                <div class="squad-section">
-                    <div class="squad-title">👥 PLAYERS</div>
-                    <div class="squad-list" id="benchList"></div>
-                </div>
-
-                <!-- RIGHT (2/3): stacked top = formation (2/3 height), bottom = settings (1/3 height) -->
-                <div style="display: grid; grid-template-rows: 2fr 1fr; gap: 15px; overflow: hidden; min-height: 0;" id="mgmtRightStack">
-                    <!-- TOP HALF: STARTING XI -->
-                    <div class="squad-section" style="padding: 0; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                        <div class="squad-title" style="border-radius: 0; flex-shrink: 0;">⚽ STARTING XI</div>
-                        <div id="formationPitch" class="fm-pitch"></div>
-
-                        <!-- Player detail overlay (covers formation pitch on click) -->
-                        <div id="playerDetailOverlay" class="player-detail-overlay" style="display: none;">
-                            <button class="player-detail-close-x" id="playerDetailCloseX" type="button" aria-label="Close">×</button>
-                            <div id="playerDetailOverlayContent"></div>
-                        </div>
-                    </div>
-
-                    <!-- BOTTOM HALF: SETTINGS -->
-                    <div style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; padding-right: 4px;" id="mgmtSettingsPane">
-                        <!-- Formation Selector (pre-match only) -->
-                        <div id="mgmtFormationSelector" style="flex-shrink: 0; display: none;">
-                        <div style="color: #FFD700; font-weight: bold; font-size: 11px; text-align: center; margin-bottom: 7px; text-transform: uppercase; letter-spacing: 1px;">⚙ Formation</div>
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;">
-                            <button class="formation-btn" data-formation="442" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-4-2<div class="formation-desc">Balanced</div></button>
-                            <button class="formation-btn" data-formation="433" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-3-3<div class="formation-desc">Offensive</div></button>
-                            <button class="formation-btn" data-formation="451" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">4-5-1<div class="formation-desc">Midfield</div></button>
-                            <button class="formation-btn" data-formation="532" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">5-3-2<div class="formation-desc">Defensive</div></button>
-                            <button class="formation-btn" data-formation="541" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">5-4-1<div class="formation-desc">Ultra Def</div></button>
-                            <button class="formation-btn" data-formation="352" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-5-2<div class="formation-desc">Mid Power</div></button>
-                            <button class="formation-btn" data-formation="343" onclick="window.game.selectFormation(this)" style="padding: 7px 4px; font-size: 12px;">3-4-3<div class="formation-desc">Attack</div></button>
-                        </div>
-                    </div>
-
-                    <!-- Tactics Panel (CM 03/04 style) -->
-                    <div class="instruction-panel" id="instructionPanel" style="flex-shrink: 0;">
-                        <div class="instruction-title">⚔ Tactics</div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Mentality</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="mentality" data-value="ultra-def">U.Def</button>
-                                <button class="tactic-btn" data-tactic="mentality" data-value="defensive">Def</button>
-                                <button class="tactic-btn active" data-tactic="mentality" data-value="normal">Normal</button>
-                                <button class="tactic-btn" data-tactic="mentality" data-value="attacking">Attack</button>
-                                <button class="tactic-btn" data-tactic="mentality" data-value="gung-ho">GungHo</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Pressing</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="closingDown" data-value="always">Always</button>
-                                <button class="tactic-btn active" data-tactic="closingDown" data-value="standard">Standard</button>
-                                <button class="tactic-btn" data-tactic="closingDown" data-value="stand-off">StandOff</button>
-                                <button class="tactic-btn" data-tactic="closingDown" data-value="own-half">Own Half</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Tackling</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="tackling" data-value="hard">Hard</button>
-                                <button class="tactic-btn active" data-tactic="tackling" data-value="normal">Normal</button>
-                                <button class="tactic-btn" data-tactic="tackling" data-value="easy">Easy</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Passing</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="passing" data-value="direct">Direct</button>
-                                <button class="tactic-btn active" data-tactic="passing" data-value="mixed">Mixed</button>
-                                <button class="tactic-btn" data-tactic="passing" data-value="short">Short</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Marking</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn active" data-tactic="marking" data-value="zonal">Zonal</button>
-                                <button class="tactic-btn" data-tactic="marking" data-value="man">Man</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Time Wasting</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn" data-tactic="timeWasting" data-value="never">Never</button>
-                                <button class="tactic-btn active" data-tactic="timeWasting" data-value="mixed">Mixed</button>
-                                <button class="tactic-btn" data-tactic="timeWasting" data-value="often">Often</button>
-                            </div>
-                        </div>
-
-                        <div class="tactic-row">
-                            <span class="tactic-label">Counter Attack</span>
-                            <div class="tactic-options">
-                                <button class="tactic-btn active" data-tactic="counterAttack" data-value="no">No</button>
-                                <button class="tactic-btn" data-tactic="counterAttack" data-value="yes">Yes</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Close Button (in-match only) — Confirm Sub & info bar removed; subs auto-apply on selection -->
-                    <div id="subControls" style="flex-shrink: 0; display: none;">
-                        <button class="btn-secondary" id="closeManageBtn" style="width: 100%;">Close</button>
-                    </div>
-
-                        <!-- Start Match Button (pre-match only) -->
-                        <div id="startMatchSection" style="flex-shrink: 0; display: none;">
-                            <button class="btn-primary" id="mgmtStartBtn" onclick="window.game.startMatch()" style="width: 100%; padding: 14px; font-size: 15px; letter-spacing: 2px; text-transform: uppercase;">▶ Start Match</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <!-- managementScreen — partial loaded from screens/managementScreen.html by screen-loader.js -->
+        <div data-screen="managementScreen"></div>
 
         <!-- Result Screen -->
-        <div class="screen" id="resultScreen">
-            <div id="resultTeamsDisplay" class="result-teams"></div>
-            <div id="resultMessage" class="result-message"></div>
-            <div class="stats" id="finalStats">
-                <div class="stat">
-                    <div class="stat-label">Final Score</div>
-                    <div class="stat-value"><span id="finalPlayerScore">0</span>-<span id="finalCpuScore">0</span></div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Shots on Target</div>
-                    <div class="stat-value"><span id="finalPlayerShots">0</span>-<span id="finalCpuShots">0</span></div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Possession</div>
-                    <div class="stat-value"><span id="finalPlayerPoss">0</span>%-<span id="finalCpuPoss">0</span>%</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Total Passes</div>
-                    <div class="stat-value"><span id="finalPlayerPasses">0</span>-<span id="finalCpuPasses">0</span></div>
-                </div>
-            </div>
+        <!-- resultScreen — partial loaded from screens/resultScreen.html by screen-loader.js -->
+        <div data-screen="resultScreen"></div>
 
-            <div style="margin-top: 25px;">
-                <div id="goalsSection" style="display: none; margin-bottom: 16px;">
-                    <h3>⚽ Goals</h3>
-                    <div id="goalsList"></div>
-                </div>
-
-                <div id="substitutionsSection" style="display: none; margin-bottom: 16px;">
-                    <h3>🔄 Substitutions</h3>
-                    <div id="substitutionsList"></div>
-                </div>
-
-                <div id="cardsSection" style="display: none; margin-bottom: 16px;">
-                    <h3>📋 Cards</h3>
-                    <div id="cardsList"></div>
-                </div>
-
-                <div id="playerStatsSection" style="display: none; margin-bottom: 16px;">
-                    <h3>📊 Player Performance</h3>
-                    <div class="player-stats-table">
-                        <div class="player-stats-col" id="playerStatsLeft"></div>
-                        <div class="player-stats-col" id="playerStatsRight"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="buttons">
-                <button class="btn-primary" id="playAgainBtn">Play Again</button>
-            </div>
-        </div>
+        <!-- clubhouseScreen — partial loaded from screens/clubhouseScreen.html by screen-loader.js -->
+        <div data-screen="clubhouseScreen"></div>
     </div>
 
     <!-- Third-party libraries (must load before our app code) -->
@@ -2239,6 +2648,9 @@
     <script src="dramatic-scenes/penalty.js"></script>
     <script src="dramatic-scenes/injury.js"></script>
     <script src="random.js"></script>
+    <script src="storage.js"></script>
+    <script src="screens/onboarding-data.js"></script>
+    <script src="league-generator.js"></script>
     <script src="game-flow.js"></script>
     <script src="zone-strength.js"></script>
     <script src="football-sim.js"></script>

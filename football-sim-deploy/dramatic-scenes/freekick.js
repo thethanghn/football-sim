@@ -92,7 +92,9 @@
         const gkPlayer    = def.find(q => q?.position === 'GK') || def[0] || { number: 1 };
         const wallPool    = def.filter(q => q !== gkPlayer);
         const wallPlayers = [0, 1, 2, 3].map(i => wallPool[i] || null);
-        const takerPlayer    = atk[0] || { number: 9 };
+        // Prefer the simulator-picked specialist if supplied; otherwise grab
+        // the first shuffled attacker. Default is right-footed.
+        const takerPlayer    = p.taker || atk[0] || { number: 9, foot: 'right' };
         const boxAttackers   = [atk[1] || null, atk[2] || null];   // 2 same-team runners in the box
 
         // Opening flash + expanding rings
@@ -135,17 +137,28 @@
             setTimeout(() => playerG.animate(280).opacity(1), 800 + i * 90);
         }
 
-        // Taker (foreground, big) — back to the viewer, facing the goal
-        // (we're standing behind the kicker as they line up the free kick)
+        // Ball position (kept fixed at the spot — the kicker offsets around it)
+        const ballX = 50, ballY = 88;
+
+        // Taker (foreground, big) — back to the viewer, facing the goal.
+        // Foot dictates which side of the ball the kicker stands on:
+        //   right-footed → body to the LEFT of the ball (plants left foot, swings right)
+        //   left-footed  → body to the RIGHT of the ball (plants right foot, swings left)
+        //   two-footed   → defaults to right-footed positioning
+        // Offset of 7 viewbox units keeps the (scale 1.6) torso + shoulders well
+        // clear of the ball's 1.6-unit radius.
+        const kickFoot = takerPlayer?.foot || 'right';
+        const standsLeftOfBall = kickFoot !== 'left';       // right + both stand left
+        const takerOffset = 7 * (standsLeftOfBall ? -1 : 1);
         const taker = draw.group().opacity(0);
-        NS._backFigure(taker, 50, 82, takerPlayer, takerColor, 1.6);
+        NS._backFigure(taker, ballX + takerOffset, 82, takerPlayer, takerColor, 1.6);
         setTimeout(() => taker.animate(380).opacity(1), 1050);
 
-        // Ball at the taker's feet
+        // Ball at the spot
         const ball = draw.group().opacity(0);
-        ball.circle(3.2).fill('white').stroke({ color: ink, width: 0.5 }).center(50, 88);
-        ball.circle(0.7).fill(ink).center(49.2, 87.3);
-        ball.circle(0.7).fill(ink).center(50.8, 88.5);
+        ball.circle(3.2).fill('white').stroke({ color: ink, width: 0.5 }).center(ballX, ballY);
+        ball.circle(0.7).fill(ink).center(ballX - 0.8, ballY - 0.7);
+        ball.circle(0.7).fill(ink).center(ballX + 0.8, ballY + 0.5);
         setTimeout(() => ball.animate(260).opacity(1), 1200);
 
         const caption = draw.text('FREE KICK')

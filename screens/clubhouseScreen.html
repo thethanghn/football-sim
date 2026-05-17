@@ -1,0 +1,104 @@
+        <!-- Clubhouse — the post-onboarding "home base" for the user's club.
+             Left rail: navigation menu. Right pane: switchable views — the
+             default "stadium" illustration, the league table, or the fixture
+             list. Other items (Squad / Play Match) navigate to other screens. -->
+        <div class="screen" id="clubhouseScreen">
+            <div class="clubhouse-grid">
+
+                <aside class="clubhouse-menu">
+                    <div class="ch-club-head">
+                        <div class="ch-crest" id="chCrestSlot"></div>
+                        <div class="ch-club-text">
+                            <div class="ch-club-name" id="chClubName">Your Club</div>
+                            <div class="ch-club-sub"  id="chClubSub">— · —</div>
+                        </div>
+                    </div>
+
+                    <button class="ch-menu-item" data-clubhouse-action="home">
+                        <span class="ch-icon">🏟️</span><span>Stadium</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="squad">
+                        <span class="ch-icon">👥</span><span>Squad</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="tactics">
+                        <span class="ch-icon">📋</span><span>Tactics &amp; XI</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="league">
+                        <span class="ch-icon">🏆</span><span>League Table</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="fixtures">
+                        <span class="ch-icon">📅</span><span>Fixtures</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="play">
+                        <span class="ch-icon">⚽</span><span>Play Next Match</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="history">
+                        <span class="ch-icon">📜</span><span>Match History</span>
+                    </button>
+                    <button class="ch-menu-item" data-clubhouse-action="office">
+                        <span class="ch-icon">🪑</span><span>Manager's Office</span>
+                    </button>
+                </aside>
+
+                <main class="clubhouse-stage">
+                    <!-- Default stadium view -->
+                    <div class="ch-view ch-view-stadium active" data-view="stadium">
+                        <div class="ch-stadium" id="chStadium"></div>
+                        <div class="ch-banner">
+                            <div class="ch-banner-tag">Home of</div>
+                            <div class="ch-banner-name" id="chBannerName">Your Club</div>
+                            <div class="ch-banner-sub"  id="chBannerSub">— · —</div>
+                        </div>
+                    </div>
+
+                    <!-- League table view -->
+                    <div class="ch-view ch-view-table" data-view="league">
+                        <div class="ch-view-head">
+                            <span>🏆</span>
+                            <span id="chLeagueTitle">League Table</span>
+                        </div>
+                        <div class="ch-view-body" id="chLeagueBody">
+                            <!-- Filled by _renderClubhouseLeague() -->
+                        </div>
+                    </div>
+
+                    <!-- Fixtures view -->
+                    <div class="ch-view ch-view-table" data-view="fixtures">
+                        <div class="ch-view-head">
+                            <span>📅</span>
+                            <span id="chFixturesTitle">Fixtures</span>
+                        </div>
+                        <div class="ch-view-body" id="chFixturesBody">
+                            <!-- Filled by _renderClubhouseFixtures() -->
+                        </div>
+                    </div>
+
+                    <!-- Tactics & XI view: hosts the relocated managementScreen
+                         content (player list + formation pitch + tactic
+                         buttons). The DOM nodes get moved here once at boot
+                         via football-sim.js. -->
+                    <div class="ch-view ch-view-tactics" data-view="tactics">
+                        <div id="chTacticsHost"></div>
+                    </div>
+
+                    <!-- Squad view: full-width player list. Clicking a row
+                         slides the detail overlay (`.ch-squad-detail`) over
+                         the top of the list within the right pane. -->
+                    <div class="ch-view ch-view-squad" data-view="squad">
+                        <div class="ch-view-head">
+                            <span>👥</span>
+                            <span id="chSquadTitle">Squad</span>
+                        </div>
+                        <div class="ch-squad-stage">
+                            <div class="ch-squad-list" id="chSquadList"><!-- player rows --></div>
+                            <div class="ch-squad-detail" id="chSquadDetail" aria-hidden="true">
+                                <button class="ch-squad-close" id="chSquadCloseBtn"
+                                        aria-label="Close details" title="Close">×</button>
+                                <div class="ch-squad-detail-inner" id="chSquadDetailInner"></div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+
+            </div>
+        </div>
