@@ -1510,7 +1510,7 @@
             border-bottom: 1px solid rgba(255, 215, 0, 0.25);
             z-index: 100;
             display: grid;
-            grid-template-columns: 1fr auto 36px;     /* brand · manager · hamburger */
+            grid-template-columns: 1fr auto auto 36px;   /* brand · manager · date · hamburger */
             align-items: center;
             gap: 14px;
             padding: 0 18px;
@@ -1532,6 +1532,16 @@
         .top-menu-manager .tmm-mgr  { color: #FFD700; font-weight: 700; }
         .top-menu-manager .tmm-sep  { color: #555; padding: 0 6px; }
         .top-menu-manager .tmm-club { color: #ddd; }
+        .top-menu-date {
+            color: #9ec0ff; font-size: 12px; font-weight: 700;
+            letter-spacing: 0.5px;
+            padding: 4px 10px;
+            border: 1px solid rgba(158, 192, 255, 0.25);
+            border-radius: 4px;
+            background: rgba(20, 36, 60, 0.55);
+            white-space: nowrap;
+        }
+        .top-menu-date:empty { display: none; }
         .hamburger-btn {
             background: transparent;
             border: 1px solid rgba(255, 215, 0, 0.4);
@@ -2004,6 +2014,109 @@
             min-height: 0;
         }
 
+        /* ─── Next Match preview view ─────────────────────────────────── */
+        /* Matches .ch-view-table so the header sits at the top with proper
+           padding and the body scrolls below it. Without this rule the view
+           inherited the default `.ch-view.active { display: flex }` row
+           layout and the header floated to the left of the matchup. */
+        .ch-view-next-match {
+            flex-direction: column;
+            background: rgba(10, 12, 20, 0.65);
+            padding: 18px 24px;
+            overflow-y: auto;
+        }
+        .ch-nm-body { margin-top: 18px; }
+        .ch-nm-round {
+            color: #aaa; font-size: 13px; letter-spacing: 0.4px;
+            text-align: center; margin-bottom: 14px;
+        }
+        .ch-nm-round b { color: #FFD700; font-weight: 800; padding-right: 8px; }
+        .ch-nm-matchup {
+            display: grid;
+            grid-template-columns: 1fr 70px 1fr;
+            align-items: center;
+            gap: 18px;
+            padding: 24px 18px;
+            background: linear-gradient(180deg, rgba(20,32,52,0.55) 0%, rgba(10,10,18,0.30) 100%);
+            border: 1px solid rgba(255,215,0,0.20);
+            border-radius: 10px;
+        }
+        .ch-nm-team { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .ch-nm-team.home { text-align: right; }
+        .ch-nm-team.away { text-align: left;  }
+        .ch-nm-team svg { width: 84px; height: auto; }
+        .ch-nm-team .ch-nm-name { color: #fff; font-weight: 800; font-size: 16px; letter-spacing: 0.3px; }
+        .ch-nm-team .ch-nm-sub  { color: #999; font-size: 11px; }
+        .ch-nm-team.user .ch-nm-name { color: #FFD700; }
+        .ch-nm-vs {
+            color: #aaa; font-size: 22px; font-weight: 900; letter-spacing: 1px;
+            text-align: center;
+        }
+        .ch-nm-meta {
+            margin-top: 16px; padding: 12px 18px;
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 10px 26px;
+            background: rgba(0,0,0,0.30);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 6px;
+            color: #ddd; font-size: 13px;
+        }
+        .ch-nm-meta .lbl { color: #888; font-size: 11px; text-transform: uppercase;
+                           letter-spacing: 0.6px; display: block; margin-bottom: 2px; }
+        .ch-nm-play-row { display: flex; justify-content: center; margin-top: 22px; }
+        .ch-nm-play-btn {
+            background: linear-gradient(180deg, #FFD700 0%, #C9A100 100%);
+            color: #1a1a1a; font-weight: 900; letter-spacing: 0.6px;
+            font-size: 16px; padding: 12px 36px;
+            border: 1px solid rgba(0,0,0,0.4);
+            border-radius: 6px; cursor: pointer;
+            box-shadow: 0 4px 12px rgba(255,215,0,0.25);
+            transition: transform 0.1s, box-shadow 0.15s;
+        }
+        .ch-nm-play-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(255,215,0,0.35);
+        }
+        .ch-nm-empty {
+            color: #999; text-align: center; padding: 60px 20px;
+            font-size: 14px;
+        }
+
+        /* ─── Fast-forward loading bar overlay ───────────────────────── */
+        .ff-overlay {
+            position: fixed; inset: 0;
+            background: rgba(8, 8, 12, 0.88);
+            backdrop-filter: blur(2px);
+            display: none;
+            align-items: center; justify-content: center;
+            z-index: 200;
+            color: #eee; font-family: Arial, sans-serif;
+        }
+        .ff-overlay.active { display: flex; }
+        .ff-card {
+            min-width: 360px; max-width: 90vw;
+            padding: 28px 36px;
+            background: #161620;
+            border: 1px solid rgba(255,215,0,0.30);
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 16px 60px rgba(0,0,0,0.55);
+        }
+        .ff-title { color: #FFD700; font-weight: 800; letter-spacing: 1px;
+                    text-transform: uppercase; font-size: 12px; margin-bottom: 14px; }
+        .ff-date  { color: #9ec0ff; font-weight: 800; font-size: 24px;
+                    letter-spacing: 0.5px; margin-bottom: 18px; }
+        .ff-track {
+            width: 100%; height: 8px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 4px; overflow: hidden;
+        }
+        .ff-fill  {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #FFD700 0%, #FF8C00 100%);
+            transition: width 0.12s linear;
+        }
+
         .ch-stadium { width: 100%; max-width: 760px; height: 460px; max-height: 70vh; }
         .ch-stadium svg { width: 100%; height: 100%; display: block; }
         .ch-banner {
@@ -2049,6 +2162,22 @@
         .ch-fix-match .ch-fix-away { text-align: left; }
         .ch-fix-match.user-club { background: rgba(255,215,0,0.08); color: #FFD700; }
         .ch-fix-match.played .ch-fix-vs { color: #FFD700; font-size: 14px; }
+        /* Past rounds dim down — they're history. Today gets a gold border
+           so the user can locate it in a long list. Upcoming stays bright. */
+        .ch-fix-round.past    { opacity: 0.68; }
+        .ch-fix-round.past    .ch-fix-round-head { background: rgba(120,120,120,0.10); color: #aaa; }
+        .ch-fix-round.today   { border-color: #FFD700; box-shadow: 0 0 0 1px rgba(255,215,0,0.25); }
+        .ch-fix-round.today   .ch-fix-round-head { background: rgba(255,215,0,0.18); }
+        .ch-fix-round-head .ch-fix-date {
+            float: right; font-weight: 600; color: inherit; opacity: 0.7;
+            text-transform: none; letter-spacing: 0.2px;
+        }
+        .ch-fix-round-head .ch-fix-tag {
+            float: right; margin-left: 10px;
+            padding: 1px 8px; border-radius: 10px;
+            font-size: 10px; font-weight: 800; letter-spacing: 0.6px;
+            background: rgba(255,215,0,0.25); color: #FFD700;
+        }
 
         /* Tactics view — host for the relocated management UI. */
         .ch-view-tactics {
@@ -2243,51 +2372,52 @@
         .ovr-40 { background: rgba(239,68,68,0.22);  color: #EF4444; }
 
         /* ── Floating bottom nav (back / forward) ─────────────────────── */
-        .floating-nav {
-            position: fixed;
-            bottom: 18px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 90;
-            display: flex; align-items: center; gap: 6px;
-            background: rgba(20, 20, 28, 0.92);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(255,215,0,0.35);
-            border-radius: 22px;
-            padding: 4px 8px;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+        /* Back / Forward pill inside the clubhouse left menu (replaces the
+           previous body-pinned floating nav). The menu uses flex column so
+           we let this element auto-margin to the bottom. */
+        .clubhouse-menu { display: flex; flex-direction: column; }
+        .ch-menu-nav {
+            margin-top: auto;                  /* push to the bottom */
+            display: grid;
+            grid-template-columns: 32px 1fr 32px;
+            align-items: center;
+            gap: 4px;
+            padding: 10px 12px;
+            border-top: 1px solid #333;
             font-family: Arial, sans-serif;
         }
-        .floating-nav .fn-btn {
-            background: transparent;
-            border: none;
+        .ch-menu-nav .fn-btn {
+            background: transparent; border: 1px solid rgba(255,215,0,0.3);
             color: #FFD700;
             width: 32px; height: 30px;
-            border-radius: 16px;
+            border-radius: 4px;
             font-size: 18px; line-height: 1;
             cursor: pointer; font-weight: 800;
             font-family: inherit;
+            padding: 0;
         }
-        .floating-nav .fn-btn:hover:not(:disabled) { background: rgba(255,215,0,0.15); }
-        .floating-nav .fn-btn:disabled { opacity: 0.28; cursor: not-allowed; }
-        .floating-nav .fn-label {
-            color: #ddd; font-size: 11px; padding: 0 6px;
-            max-width: 180px; overflow: hidden; text-overflow: ellipsis;
-            white-space: nowrap;
+        .ch-menu-nav .fn-btn:hover:not(:disabled) {
+            background: rgba(255,215,0,0.12);
+            border-color: rgba(255,215,0,0.6);
+        }
+        .ch-menu-nav .fn-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+        .ch-menu-nav .fn-label {
+            color: #ccc; font-size: 11px; text-align: center;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
     </style>
     <!-- Screen partials are loaded from screens/<name>.html and injected into
          the [data-screen] placeholders below. football-sim.js's bootstrap
          waits for the 'screensReady' event before calling getElementById on
          injected nodes. -->
-    <script src="screens/screen-loader.js?v=17"></script>
+    <script src="screens/screen-loader.js?v=21"></script>
 </head>
 <body>
     <!-- Top floating menu bar (always visible) -->
     <div class="top-menu-bar" id="topMenuBar">
         <div class="top-menu-title">⚽ Football Match Simulator</div>
         <div class="top-menu-manager" id="topMenuManager"><!-- manager + club label --></div>
+        <div class="top-menu-date"    id="topMenuDate"><!-- in-game date --></div>
         <button class="hamburger-btn" id="hamburgerBtn"
                 aria-label="Open menu" aria-expanded="false" title="Menu">☰</button>
     </div>
@@ -2379,13 +2509,17 @@
          proves the Phaser integration is alive without touching the match engine. -->
     <div id="phaserBadge" style="position: fixed; top: 52px; right: 8px; width: 40px; height: 40px; z-index: 999; pointer-events: none;"></div>
 
-    <!-- Floating nav (back / forward) — pill pinned to the bottom-centre.
-         Driven by football-sim.js's navigation stack. -->
-    <div class="floating-nav" id="floatingNav" aria-label="Navigation history">
-        <button id="navBackBtn" class="fn-btn" disabled aria-label="Back" title="Back">‹</button>
-        <span class="fn-label" id="navLabel">—</span>
-        <button id="navFwdBtn"  class="fn-btn" disabled aria-label="Forward" title="Forward">›</button>
+    <!-- Back / Forward nav has moved into the clubhouse left-menu footer. -->
+    <!-- Fast-forward overlay: ticks the in-game date from current → match day
+         while a gold bar fills, then unmounts and the formation screen shows. -->
+    <div class="ff-overlay" id="ffOverlay" aria-hidden="true">
+        <div class="ff-card">
+            <div class="ff-title" id="ffTitle">Fast-forwarding</div>
+            <div class="ff-date"  id="ffDate">—</div>
+            <div class="ff-track"><div class="ff-fill" id="ffFill"></div></div>
+        </div>
     </div>
+
     <div class="container">
         <!-- Title moved into the top menu bar. Screens render full-width. -->
         <!-- Formation Selection Screen -->
@@ -2653,25 +2787,25 @@
     <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
     <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
 
-    <script src="audio.js?v=17"></script>
-    <script src="dramatic.js?v=17"></script>
+    <script src="audio.js?v=21"></script>
+    <script src="dramatic.js?v=21"></script>
     <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
-    <script src="dramatic-scenes/_helpers.js?v=17"></script>
-    <script src="dramatic-scenes/goal.js?v=17"></script>
-    <script src="dramatic-scenes/freekick.js?v=17"></script>
-    <script src="dramatic-scenes/kickoff.js?v=17"></script>
-    <script src="dramatic-scenes/corner.js?v=17"></script>
-    <script src="dramatic-scenes/redCard.js?v=17"></script>
-    <script src="dramatic-scenes/disallowed.js?v=17"></script>
-    <script src="dramatic-scenes/penalty.js?v=17"></script>
-    <script src="dramatic-scenes/injury.js?v=17"></script>
-    <script src="random.js?v=17"></script>
-    <script src="storage.js?v=17"></script>
-    <script src="screens/onboarding-data.js?v=17"></script>
-    <script src="league-generator.js?v=17"></script>
-    <script src="game-flow.js?v=17"></script>
-    <script src="zone-strength.js?v=17"></script>
-    <script src="football-sim.js?v=17"></script>
-    <script src="phaser-badge.js?v=17"></script>
+    <script src="dramatic-scenes/_helpers.js?v=21"></script>
+    <script src="dramatic-scenes/goal.js?v=21"></script>
+    <script src="dramatic-scenes/freekick.js?v=21"></script>
+    <script src="dramatic-scenes/kickoff.js?v=21"></script>
+    <script src="dramatic-scenes/corner.js?v=21"></script>
+    <script src="dramatic-scenes/redCard.js?v=21"></script>
+    <script src="dramatic-scenes/disallowed.js?v=21"></script>
+    <script src="dramatic-scenes/penalty.js?v=21"></script>
+    <script src="dramatic-scenes/injury.js?v=21"></script>
+    <script src="random.js?v=21"></script>
+    <script src="storage.js?v=21"></script>
+    <script src="screens/onboarding-data.js?v=21"></script>
+    <script src="league-generator.js?v=21"></script>
+    <script src="game-flow.js?v=21"></script>
+    <script src="zone-strength.js?v=21"></script>
+    <script src="football-sim.js?v=21"></script>
+    <script src="phaser-badge.js?v=21"></script>
 </body>
 </html>

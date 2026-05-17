@@ -1745,8 +1745,10 @@
                     const closeManageBtn = document.getElementById('closeManageBtn');
                     if (closeManageBtn) closeManageBtn.addEventListener('click', () => this.closeManagement());
 
-                    const playAgainBtn = document.getElementById('playAgainBtn');
-                    if (playAgainBtn) playAgainBtn.addEventListener('click', () => this.reset());
+                    const backToClubhouseBtn = document.getElementById('backToClubhouseBtn');
+                    if (backToClubhouseBtn) backToClubhouseBtn.addEventListener('click', () => {
+                        this._finalizeMatchDay();
+                    });
 
                     document.querySelectorAll('.tactic-btn').forEach(btn => {
                         btn.addEventListener('click', () => this.setTactic(btn.dataset.tactic, btn.dataset.value));
@@ -1760,12 +1762,9 @@
                     this.setupTopMenu();
                     // Floating bottom nav (back / forward) + nav stack init
                     this._initNavStack();
-                    // Re-parent the management screen's inner content into the
-                    // clubhouse "Tactics & XI" pane so the old full-screen
-                    // editor now lives inline in the clubhouse right pane.
-                    // All IDs are preserved, so existing renderManagementPanel
-                    // / event handlers keep working without modification.
-                    this._relocateManagementContent();
+                    // (Management content stays in #managementScreen — it's now
+                    // an independent screen reached via the Tactics & XI menu,
+                    // the kick-off step, and the in-match Manage button.)
 
                     // First-run onboarding: prompt for a manager name if none saved.
                     // If a manager + league already exist, skip onboarding and land
@@ -1777,6 +1776,7 @@
                             this._showOnboarding();
                         } else {
                             this._refreshManagerLabel();
+                            this._refreshDateLabel();
                             if (mgr.clubName) {
                                 // Defer until the management panel render is finished so
                                 // switchScreen finds the clubhouse partial in the DOM.
@@ -2340,10 +2340,19 @@
                         createdAt: new Date().toISOString(),
                     });
                     if (league) GameStorage.saveLeague(league);
-                    // Generate the round-robin fixture list once the league is set
+                    // Generate the round-robin fixture list + assign calendar
+                    // dates starting at the nation's typical kickoff. In-game
+                    // "current date" is set one week before round 1.
                     if (league && typeof LeagueGenerator !== 'undefined') {
-                        const fixtures = LeagueGenerator.generateFixtures(league);
+                        const kickoff  = LeagueGenerator.nextKickoffDate(nation, new Date());
+                        let fixtures = LeagueGenerator.generateFixtures(league);
+                        if (kickoff) fixtures = LeagueGenerator.scheduleFixtures(fixtures, kickoff);
                         GameStorage.saveFixtures(fixtures);
+                        if (kickoff) {
+                            const cur = new Date(kickoff);
+                            cur.setDate(cur.getDate() - 7);
+                            GameStorage.saveCurrentDate(cur.toISOString().slice(0, 10));
+                        }
                     }
                 }
 
@@ -2376,6 +2385,7 @@
                     overlay.setAttribute('aria-hidden', 'true');
                 }
                 this._refreshManagerLabel();
+                this._refreshDateLabel();
                 // Land on the Clubhouse, not the formation pick
                 this._enterClubhouse();
                 console.log(`Career started: ${name} · ${nation.name} · ${userClub?.clubName || city.name}`);
@@ -2395,6 +2405,24 @@
                 slot.innerHTML = `<span class="tmm-mgr">${mgr.name}</span>${club}`;
             }
 
+            // Renders the in-game date into the top bar. Hidden if no career is
+            // running (pre-onboarding boot, just after a wipe, etc.).
+            _refreshDateLabel() {
+                const slot = document.getElementById('topMenuDate');
+                if (!slot) return;
+                const iso = (typeof GameStorage !== 'undefined') ? GameStorage.loadCurrentDate() : null;
+                slot.textContent = iso ? this._formatDate(iso) : '';
+            }
+
+            // YYYY-MM-DD → "Sat, 14 Feb 2027". Used by top-bar date + match
+            // preview header. Robust to invalid inputs (returns the raw string).
+            _formatDate(iso) {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return iso || '';
+                const opts = { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' };
+                return d.toLocaleDateString('en-GB', opts);
+            }
+
             // ─── Clubhouse ───────────────────────────────────────────────────
             // Post-onboarding home base — left menu + stadium illustration.
             // Menu items link to existing screens (management / match) plus the
@@ -2402,6 +2430,12 @@
             _enterClubhouse() {
                 const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
                 if (!mgr) return;
+                // Block clubhouse access while a match is in progress — the
+                // user must finish (or the match must end) before returning.
+                if (this._inMatch) {
+                    console.warn('_enterClubhouse blocked: match in progress');
+                    return;
+                }
 
                 // Header — club crest + name + sub-line
                 const crestSlot = document.getElementById('chCrestSlot');
@@ -2436,6 +2470,10 @@
             }
 
             _handleClubhouseAction(action) {
+                if (this._inMatch) {
+                    console.warn('Clubhouse action blocked mid-match:', action);
+                    return;
+                }
                 switch (action) {
                     case 'home':
                         this._navigateTo('🏟️ Stadium', () => this._setClubhouseView('stadium'));
@@ -2447,11 +2485,15 @@
                         });
                         break;
                     case 'tactics':
-                        // Inline management editor (relocated into the right pane)
-                        this._navigateTo('📋 Tactics & XI', () => this._openTacticsView());
+                        // Independent Match Management screen — adjusting tactics
+                        // from the Clubhouse (mode = 'tactics' → Back to Clubhouse).
+                        this._navigateTo('📋 Tactics & XI', () => this._openTacticsView('tactics'));
                         break;
                     case 'play':
-                        this._navigateTo('⚽ Play Match', () => this.switchScreen('formationScreen'));
+                        this._navigateTo('⚽ Next Match', () => {
+                            this._setClubhouseView('next-match');
+                            this._renderNextMatchView();
+                        });
                         break;
                     case 'history':
                         this._showHistoryModal();
@@ -2474,25 +2516,18 @@
                 }
             }
 
-            // Moves the inner children of #managementScreen into #chTacticsHost
-            // exactly once at boot. After this, the standalone management screen
-            // div is empty but still present (so anything that still references
-            // it doesn't blow up) and all #benchList / #formationPitch / etc.
-            // queries continue to resolve, just under a new parent.
-            _relocateManagementContent() {
-                const src  = document.getElementById('managementScreen');
-                const host = document.getElementById('chTacticsHost');
-                if (!src || !host) return;
-                if (host.firstChild) return;          // idempotent — only move once
-                while (src.firstChild) host.appendChild(src.firstChild);
-            }
-
-            // Opens the Tactics & XI sub-view inside the clubhouse right pane
-            // and runs the management-panel render so the squad list, formation
-            // pitch, and tactic buttons reflect the latest state.
-            _openTacticsView() {
-                this.switchScreen('clubhouseScreen');
-                this._setClubhouseView('tactics');
+            // Opens the independent Match Management screen in one of three
+            // modes:
+            //   'tactics' — adjusting tactics from the Clubhouse (outside any
+            //               match). Primary action: Back to Clubhouse.
+            //   'kickoff' — final XI / tactic review right before kick-off.
+            //               Primary action: Kick Off Match.
+            //   'inMatch' — opened mid-match via the Manage button (match is
+            //               paused). Primary action: Resume Match. Clubhouse
+            //               access is blocked while in this mode.
+            _openTacticsView(mode = 'tactics') {
+                this._mgmtMode = mode;
+                this.switchScreen('managementScreen');
                 this.renderManagementPanel();
             }
 
@@ -2555,6 +2590,7 @@
                 if (!body) return;
                 const fixtures = (typeof GameStorage !== 'undefined') ? GameStorage.loadFixtures() : null;
                 const league   = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : [];
+                const currentISO = (typeof GameStorage !== 'undefined') ? GameStorage.loadCurrentDate() : null;
                 const userClubName = (league || []).find(c => c.isUserClub)?.clubName || null;
 
                 if (!fixtures || !fixtures.length) {
@@ -2562,9 +2598,22 @@
                     return;
                 }
 
-                body.innerHTML = fixtures.map(rd => `
-                    <div class="ch-fix-round">
-                        <div class="ch-fix-round-head">Round ${rd.round}</div>
+                // Classify each round: past (all matches played), today (the
+                // current in-game date matches this round's date), or upcoming.
+                const roundClass = (rd) => {
+                    const allPlayed = rd.matches.every(m => m.played);
+                    if (rd.date && currentISO && rd.date === currentISO) return 'today';
+                    if (allPlayed) return 'past';
+                    return 'upcoming';
+                };
+
+                body.innerHTML = fixtures.map(rd => {
+                    const cls = roundClass(rd);
+                    const tag = cls === 'today' ? `<span class="ch-fix-tag">TODAY</span>` : '';
+                    const dateLabel = rd.date
+                        ? `<span class="ch-fix-date">${this._formatDate(rd.date)}</span>` : '';
+                    return `<div class="ch-fix-round ${cls}">
+                        <div class="ch-fix-round-head">Round ${rd.round}${tag}${dateLabel}</div>
                         ${rd.matches.map(m => {
                             const isUser = userClubName && (m.home === userClubName || m.away === userClubName);
                             const vsLabel = m.played
@@ -2576,8 +2625,266 @@
                                 <span class="ch-fix-away">${m.away}</span>
                             </div>`;
                         }).join('')}
+                    </div>`;
+                }).join('');
+            }
+
+            // ─── Next-match preview ────────────────────────────────────
+            // Walks the saved fixture list, picks the first unplayed match
+            // involving the user club, and renders the matchup card + Play
+            // button. The Play button triggers the fast-forward overlay.
+            _findNextUserFixture() {
+                const fixtures = (typeof GameStorage !== 'undefined') ? GameStorage.loadFixtures() : null;
+                const league   = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : [];
+                const userClub = (league || []).find(c => c.isUserClub) || null;
+                if (!fixtures || !userClub) return null;
+                for (const rd of fixtures) {
+                    const m = (rd.matches || []).find(x => !x.played &&
+                        (x.home === userClub.clubName || x.away === userClub.clubName));
+                    if (m) return { round: rd.round, date: rd.date, match: m, league, userClub };
+                }
+                return null;
+            }
+
+            _renderNextMatchView() {
+                const body = document.getElementById('chNextMatchBody');
+                if (!body) return;
+                const next = this._findNextUserFixture();
+                if (!next) {
+                    body.innerHTML = `<div class="ch-nm-empty">No more fixtures this season. Reset career to start a new season.</div>`;
+                    return;
+                }
+                const { round, date, match, league, userClub } = next;
+                const homeClub = league.find(c => c.clubName === match.home) || null;
+                const awayClub = league.find(c => c.clubName === match.away) || null;
+                const userIsHome = match.home === userClub.clubName;
+                const venue      = `${homeClub?.cityName || match.home} Stadium`;
+                const competition = this._currentCompetitionName();
+                const crest = (c) => (c && typeof CrestGenerator !== 'undefined')
+                    ? CrestGenerator.generateSVG(c.crestSeed, c.jerseyColor, 84)
+                    : '';
+
+                body.innerHTML = `
+                    <div class="ch-nm-round"><b>Round ${round}</b>${date ? ' · ' + this._formatDate(date) : ''}</div>
+                    <div class="ch-nm-matchup">
+                        <div class="ch-nm-team home ${userIsHome ? 'user' : ''}">
+                            ${crest(homeClub)}
+                            <div class="ch-nm-name">${match.home}</div>
+                            <div class="ch-nm-sub">Home</div>
+                        </div>
+                        <div class="ch-nm-vs">vs</div>
+                        <div class="ch-nm-team away ${!userIsHome ? 'user' : ''}">
+                            ${crest(awayClub)}
+                            <div class="ch-nm-name">${match.away}</div>
+                            <div class="ch-nm-sub">Away</div>
+                        </div>
                     </div>
-                `).join('');
+                    <div class="ch-nm-meta">
+                        <div><span class="lbl">Competition</span>${competition}</div>
+                        <div><span class="lbl">Venue</span>${venue}</div>
+                        <div><span class="lbl">Round</span>${round} of ${this._totalRounds()}</div>
+                        <div><span class="lbl">Kickoff</span>${date ? this._formatDate(date) : '—'}</div>
+                    </div>
+                    <div class="ch-nm-play-row">
+                        <button class="ch-nm-play-btn" id="chNextMatchPlayBtn">▶ Play Match</button>
+                    </div>
+                `;
+                const btn = document.getElementById('chNextMatchPlayBtn');
+                btn?.addEventListener('click', () => this._fastForwardToMatch(next));
+            }
+
+            _currentCompetitionName() {
+                const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                const nation = (mgr?.nation && typeof SEA_NATIONS !== 'undefined')
+                    ? SEA_NATIONS.find(n => n.code === mgr.nation) : null;
+                return nation?.leagueName || 'League';
+            }
+
+            _totalRounds() {
+                const fixtures = (typeof GameStorage !== 'undefined') ? GameStorage.loadFixtures() : null;
+                return Array.isArray(fixtures) ? fixtures.length : 0;
+            }
+
+            // Fast-forward overlay: animates the in-game date from current to
+            // the fixture date over ~1.2s while a gold bar fills, then jumps
+            // to the formation screen. The opponent identity is stashed on
+            // the simulator so _buildCpuOpponent can read it instead of
+            // picking a random league club.
+            _fastForwardToMatch(ctx) {
+                const overlay = document.getElementById('ffOverlay');
+                const dateEl  = document.getElementById('ffDate');
+                const fill    = document.getElementById('ffFill');
+                if (!overlay || !dateEl || !fill) {
+                    // Fall back to immediate switch if overlay markup is missing
+                    this._pendingFixture = ctx;
+                    this.switchScreen('formationScreen');
+                    return;
+                }
+                this._pendingFixture = ctx;
+
+                const startISO = (typeof GameStorage !== 'undefined')
+                    ? GameStorage.loadCurrentDate() : null;
+                const endISO   = ctx.date;
+                const start = startISO ? new Date(startISO) : new Date();
+                const end   = endISO   ? new Date(endISO)   : start;
+                const totalDays = Math.max(1, Math.round((end - start) / 86400000));
+
+                overlay.classList.add('active');
+                overlay.setAttribute('aria-hidden', 'false');
+                fill.style.width = '0%';
+                dateEl.textContent = this._formatDate(start.toISOString().slice(0, 10));
+
+                const duration = 1200;   // ms
+                const t0 = performance.now();
+                const tick = (now) => {
+                    const p = Math.min(1, (now - t0) / duration);
+                    fill.style.width = (p * 100).toFixed(1) + '%';
+                    const dayOffset = Math.round(p * totalDays);
+                    const d = new Date(start);
+                    d.setDate(d.getDate() + dayOffset);
+                    dateEl.textContent = this._formatDate(d.toISOString().slice(0, 10));
+                    if (p < 1) {
+                        requestAnimationFrame(tick);
+                    } else {
+                        // Advance and persist the calendar to the match day
+                        if (typeof GameStorage !== 'undefined' && endISO) {
+                            GameStorage.saveCurrentDate(endISO);
+                        }
+                        this._refreshDateLabel();
+                        overlay.classList.remove('active');
+                        overlay.setAttribute('aria-hidden', 'true');
+                        // Land on the Match Management screen in kickoff mode —
+                        // the user reviews / tweaks XI + tactics, then clicks
+                        // Kick Off to actually start the match.
+                        this.isPreMatch = true;
+                        this._openTacticsView('kickoff');
+                    }
+                };
+                requestAnimationFrame(tick);
+            }
+
+            // After the user's match ends and they click Back to Clubhouse:
+            //   1) mark the user's fixture as played + persist the score,
+            //   2) simulate the other 4 matches in the same round,
+            //   3) update league standings + persist,
+            //   4) show a brief loading bar, then land on Today's Fixture view.
+            _finalizeMatchDay() {
+                this._showSimOverlay('Simulating other matches…', 1200, () => {
+                    // (a) record the user's match result + (b) simulate the rest.
+                    this._persistRoundResults();
+                    // (c) reset the live match state so the player team / tactics
+                    //     reload cleanly when the user next opens Tactics or Play.
+                    this.reset();
+                    // (d) drop into the clubhouse Today's Fixture view.
+                    this._enterClubhouse();
+                    this._navigateTo('📋 Today\'s Results', () => {
+                        this._setClubhouseView('today-fixture');
+                        this._renderTodaysFixturePanel();
+                    });
+                });
+            }
+
+            // Find the user's current fixture, mark it played with the final
+            // score, then simulate every other unplayed match in that round
+            // and apply all results to the league standings. Persists both.
+            _persistRoundResults() {
+                if (typeof GameStorage === 'undefined') return;
+                const fixtures = GameStorage.loadFixtures();
+                const league   = GameStorage.loadLeague();
+                if (!Array.isArray(fixtures) || !Array.isArray(league)) return;
+                const pending = this._pendingFixture;
+                if (!pending) return;
+
+                const userClubName = pending.userClub?.clubName;
+                const round = fixtures.find(r => r.round === pending.round);
+                if (!round) return;
+
+                // (1) Mark the user's match
+                const userMatch = round.matches.find(m =>
+                    m.home === pending.match.home && m.away === pending.match.away);
+                if (userMatch && !userMatch.played) {
+                    // Map sim scores by user side. The user might be home or away.
+                    const userIsHome = userMatch.home === userClubName;
+                    userMatch.homeScore = userIsHome ? this.playerScore : this.cpuScore;
+                    userMatch.awayScore = userIsHome ? this.cpuScore    : this.playerScore;
+                    userMatch.played = true;
+                    LeagueGenerator.applyResult(league,
+                        userMatch.home, userMatch.away, userMatch.homeScore, userMatch.awayScore);
+                }
+
+                // (2) Simulate every other unplayed match in this round
+                LeagueGenerator.simulateRound(round, league,
+                    (m) => m === userMatch);
+
+                // (3) Persist + remember the round just played so the Today's
+                //     Fixture view can render it.
+                GameStorage.saveFixtures(fixtures);
+                GameStorage.saveLeague(league);
+                this._lastPlayedRound = round;
+                this._pendingFixture  = null;
+            }
+
+            // Reusable loading overlay (same DOM as fast-forward). Plays a
+            // gold-bar fill over `durationMs`, then runs `onDone`. Used by
+            // _finalizeMatchDay to mask the brief simulation work.
+            _showSimOverlay(title, durationMs, onDone) {
+                const overlay = document.getElementById('ffOverlay');
+                const titleEl = document.getElementById('ffTitle');
+                const dateEl  = document.getElementById('ffDate');
+                const fill    = document.getElementById('ffFill');
+                if (!overlay || !fill) { onDone?.(); return; }
+                if (titleEl) titleEl.textContent = title;
+                const iso = (typeof GameStorage !== 'undefined') ? GameStorage.loadCurrentDate() : null;
+                if (dateEl) dateEl.textContent = iso ? this._formatDate(iso) : '';
+                overlay.classList.add('active');
+                overlay.setAttribute('aria-hidden', 'false');
+                fill.style.width = '0%';
+
+                const t0 = performance.now();
+                const tick = (now) => {
+                    const p = Math.min(1, (now - t0) / durationMs);
+                    fill.style.width = (p * 100).toFixed(1) + '%';
+                    if (p < 1) requestAnimationFrame(tick);
+                    else {
+                        overlay.classList.remove('active');
+                        overlay.setAttribute('aria-hidden', 'true');
+                        // Restore default title for the next fast-forward use.
+                        if (titleEl) titleEl.textContent = 'Fast-forwarding';
+                        onDone?.();
+                    }
+                };
+                requestAnimationFrame(tick);
+            }
+
+            // Render the Today's Fixture view — every match in the round the
+            // user just played, in display order. User's match is highlighted.
+            _renderTodaysFixturePanel() {
+                const body = document.getElementById('chTodayBody');
+                const title = document.getElementById('chTodayTitle');
+                if (!body) return;
+                const round = this._lastPlayedRound;
+                const league = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : [];
+                const userClubName = (league || []).find(c => c.isUserClub)?.clubName || null;
+
+                if (!round) {
+                    body.innerHTML = `<div class="tm-hist-empty">No round played yet.</div>`;
+                    if (title) title.textContent = 'Today\'s Results';
+                    return;
+                }
+                if (title) {
+                    title.textContent = `Round ${round.round} · ${round.date ? this._formatDate(round.date) : ''}`;
+                }
+                body.innerHTML = `<div class="ch-fix-round today">
+                    ${round.matches.map(m => {
+                        const isUser = userClubName &&
+                            (m.home === userClubName || m.away === userClubName);
+                        return `<div class="ch-fix-match ${isUser ? 'user-club' : ''} played">
+                            <span class="ch-fix-home">${m.home}</span>
+                            <span class="ch-fix-vs">${m.homeScore ?? 0} – ${m.awayScore ?? 0}</span>
+                            <span class="ch-fix-away">${m.away}</span>
+                        </div>`;
+                    }).join('')}
+                </div>`;
             }
 
             // Squad panel — full-pane player list (Starting XI, Bench, Reserves).
@@ -3584,6 +3891,7 @@
                 try {
                     console.log('startMatch called');
                     this.isPreMatch = false;
+                    this._inMatch   = true;       // gate clubhouse access until match ends
                     this.rules.reset();
                     // Persist the player team + tactics now so any mid-match
                     // adjustments (instructions, customPos drags) survive a reload.
@@ -3733,9 +4041,24 @@
                     ? SEA_NATIONS.find(n => n.code === homeCode) : null;
 
                 if (Array.isArray(league) && league.length > 1) {
-                    const opponents = league.filter(c => !c.isUserClub);
-                    if (opponents.length) {
-                        const club = opponents[Math.floor(Math.random() * opponents.length)];
+                    let club = null;
+                    // If the user came in through "Play Next Match", honour the
+                    // fixture's opponent so the right two clubs actually meet.
+                    const pending = this._pendingFixture;
+                    if (pending?.match && pending?.userClub) {
+                        const oppName = (pending.match.home === pending.userClub.clubName)
+                            ? pending.match.away : pending.match.home;
+                        club = league.find(c => c.clubName === oppName) || null;
+                    }
+                    // Fallback: pick any non-user club (used for "Play again" /
+                    // testing flows where there's no scheduled fixture).
+                    if (!club) {
+                        const opponents = league.filter(c => !c.isUserClub);
+                        if (opponents.length) {
+                            club = opponents[Math.floor(Math.random() * opponents.length)];
+                        }
+                    }
+                    if (club) {
                         const cpu = new Team('CPU', this.playerTeam.jerseyColor, null, {
                             homeNation, budget: club.budget,
                         });
@@ -5344,8 +5667,9 @@
                 this.isPreMatch = false;
                 this.selectedPlayerOut = null;
                 this.selectedPlayerIn = null;
-                // Open the tactics editor inside the clubhouse pane
-                this._navigateTo('📋 Tactics & XI', () => this._openTacticsView());
+                // Open the independent Match Management screen in in-match mode.
+                // No _navigateTo — the back/forward nav stack is clubhouse-scoped.
+                this._openTacticsView('inMatch');
             }
 
             // Short-lived notice shown at the top of the management panel.
@@ -5960,17 +6284,48 @@
                 if (detailOverlay) detailOverlay.style.display = 'none';
                 this._hideAllPlayerPopovers?.();
 
-                // Toggle pre-match vs in-match UI
+                // Toggle the primary-action button based on _mgmtMode.
+                // Three modes share this screen — see _openTacticsView().
+                const mode    = this._mgmtMode || (this.isPreMatch ? 'kickoff' : 'inMatch');
                 const formSel = document.getElementById('mgmtFormationSelector');
                 const startSec = document.getElementById('startMatchSection');
-                const subCtrl = document.getElementById('subControls');
-                // Formation selector is available in both pre-match and mid-match.
+                const subCtrl  = document.getElementById('subControls');
+                const startBtn = document.getElementById('mgmtStartBtn');
+                const closeBtn = document.getElementById('closeManageBtn');
+
+                // Formation selector is available in all three modes.
                 if (formSel) formSel.style.display = 'block';
-                if (startSec) startSec.style.display = this.isPreMatch ? 'block' : 'none';
-                // Sub controls (Close button container) — only meaningful mid-match.
-                if (subCtrl) subCtrl.style.display = this.isPreMatch ? 'none' : 'block';
-                const closeBtnEl = document.getElementById('closeManageBtn');
-                if (closeBtnEl) closeBtnEl.style.display = this.isPreMatch ? 'none' : 'block';
+
+                // The Start/Kick-Off/Back container hosts the primary action
+                // for 'tactics' and 'kickoff'. The Close container hosts the
+                // primary action for 'inMatch'.
+                if (startSec) startSec.style.display = (mode === 'inMatch') ? 'none' : 'block';
+                if (subCtrl)  subCtrl.style.display  = (mode === 'inMatch') ? 'block' : 'none';
+
+                if (startBtn) {
+                    // Rewire the click handler each render so we can swap modes
+                    // without stacking listeners. onclick assignment also wipes
+                    // the original inline `onclick="window.game.startMatch()"`.
+                    if (mode === 'kickoff') {
+                        startBtn.textContent = '▶ Kick Off Match';
+                        startBtn.onclick = () => this.startMatch();
+                    } else {  // 'tactics'
+                        startBtn.textContent = '← Back to Clubhouse';
+                        startBtn.onclick = () => {
+                            // Tactics tweaks made here persist via saveTactics;
+                            // re-render the clubhouse so any squad changes show.
+                            if (typeof GameStorage !== 'undefined' && this.playerTeam) {
+                                GameStorage.savePlayerTeam(this.playerTeam.serialize());
+                                GameStorage.saveTactics(this.tactics, this.playerFormation);
+                            }
+                            this._enterClubhouse();
+                        };
+                    }
+                }
+                if (closeBtn) {
+                    closeBtn.style.display = (mode === 'inMatch') ? 'block' : 'none';
+                    if (mode === 'inMatch') closeBtn.textContent = '← Resume Match';
+                }
 
                 // Highlight selected formation button
                 if (this.playerFormation) {
@@ -6305,6 +6660,7 @@
                     }
                 }
 
+                this._inMatch = false;          // clubhouse access restored
                 this.switchScreen('resultScreen');
                 this.displayResult();
             }
@@ -6543,8 +6899,10 @@
                 if (typeof GameStorage !== 'undefined') {
                     GameStorage.resetCareer();   // wipes manager + team + tactics + history
                 }
+                this._inMatch = false;           // clear the in-match guard
                 this.reset();
                 this._refreshManagerLabel();      // title falls back to generic label
+                this._refreshDateLabel();         // and the date chip
                 this._showOnboarding();           // back to step 1 (choose manager name)
                 console.log('Career reset — onboarding shown.');
             }

@@ -112,9 +112,9 @@ class LeagueGenerator {
     }
 
     // Round-robin fixture schedule using the standard "circle method".
-    // For an even number of clubs n: returns n-1 rounds, each with n/2 matches.
-    // Home/away here is informational — the simulator picks who attacks first.
-    // (Single round-robin for now; double-round can be added by mirroring.)
+    // For an even number of clubs n: returns 2(n-1) rounds (double round-robin,
+    // home + away leg) so a 10-club league spans 18 matchweeks like real life.
+    // Home/away on the second leg is mirrored from the first.
     static generateFixtures(clubs) {
         const teams = clubs.map(c => c.clubName);
         if (teams.length < 2) return [];
@@ -125,7 +125,7 @@ class LeagueGenerator {
 
         const n = arr.length;
         const numRounds = n - 1;
-        const rounds = [];
+        const firstLeg = [];
 
         for (let r = 0; r < numRounds; r++) {
             const matches = [];
@@ -139,14 +139,119 @@ class LeagueGenerator {
                     });
                 }
             }
-            rounds.push({ round: r + 1, matches });
+            firstLeg.push({ round: r + 1, matches });
             // Rotate: first slot fixed, others shift clockwise by one
             const fixed = arr[0];
             const rest  = arr.slice(1);
             rest.unshift(rest.pop());
             arr.splice(0, arr.length, fixed, ...rest);
         }
+
+        // Second leg — mirror home/away of each match.
+        const secondLeg = firstLeg.map((r, idx) => ({
+            round: numRounds + idx + 1,
+            matches: r.matches.map(m => ({
+                home: m.away, away: m.home,
+                played: false, homeScore: null, awayScore: null,
+            })),
+        }));
+
+        return [...firstLeg, ...secondLeg];
+    }
+
+    // Decorate each round with a calendar date, starting at `kickoffDate`
+    // and spacing one round every 7 days. Per-round day-of-week alternates
+    // between Saturday and Sunday (kickoff anchors round 1).
+    // Mutates and returns the input rounds for convenience.
+    static scheduleFixtures(rounds, kickoffDate) {
+        if (!Array.isArray(rounds) || !rounds.length) return rounds;
+        const start = new Date(kickoffDate);
+        if (isNaN(start.getTime())) return rounds;
+        rounds.forEach((round, i) => {
+            const d = new Date(start);
+            // Weekly cadence + alternate Sat/Sun by adding +1 day on odd rounds.
+            d.setDate(d.getDate() + i * 7 + (i % 2 === 1 ? 1 : 0));
+            round.date = d.toISOString().slice(0, 10);   // YYYY-MM-DD
+        });
         return rounds;
+    }
+
+    // Find the next occurrence of the nation's league kickoff (month/day) on
+    // or after `fromDate`. Nudges to the nearest following Saturday so the
+    // opening weekend feels canonical regardless of which day-of-week the raw
+    // date falls on.
+    static nextKickoffDate(nation, fromDate) {
+        const cal = nation?.leagueStart;
+        if (!cal) return null;
+        const from = new Date(fromDate);
+        if (isNaN(from.getTime())) return null;
+        let d = new Date(from.getFullYear(), cal.month - 1, cal.day);
+        if (d < from) d = new Date(from.getFullYear() + 1, cal.month - 1, cal.day);
+        // Snap forward to the nearest Saturday (getDay: 0=Sun..6=Sat)
+        const delta = (6 - d.getDay() + 7) % 7;
+        d.setDate(d.getDate() + delta);
+        return d.toISOString().slice(0, 10);
+    }
+
+    // ─── Quick CPU-vs-CPU simulation ────────────────────────────────────
+    // Cheap, no-animation match: turns two clubs' budgets into expected goal
+    // counts and samples Poisson distributions to produce a final score.
+    // Used to fill in the other 4 matches of the user's round when they Back
+    // to Clubhouse — so the table moves even though we only animate one game.
+    static _poisson(lambda) {
+        const L = Math.exp(-Math.max(0.05, lambda));
+        let k = 0, p = 1;
+        do { k++; p *= Math.random(); } while (p > L);
+        return k - 1;
+    }
+
+    static simulateScore(homeBudget = 60, awayBudget = 60) {
+        const base       = 1.30;
+        const homeBoost  = 0.30;
+        // budget range ~12..180; centred at 60. Scale ±2.5 goals at the extremes.
+        const diff       = (homeBudget - awayBudget) / 60;
+        const homeExp    = Math.max(0.20, base + homeBoost + diff);
+        const awayExp    = Math.max(0.20, base - diff);
+        return {
+            home: this._poisson(homeExp),
+            away: this._poisson(awayExp),
+        };
+    }
+
+    // Apply a match result to the league standings. Mutates the `league`
+    // array in place. Returns the updated league for convenience.
+    static applyResult(league, homeName, awayName, homeScore, awayScore) {
+        if (!Array.isArray(league)) return league;
+        const home = league.find(c => c.clubName === homeName);
+        const away = league.find(c => c.clubName === awayName);
+        if (!home || !away) return league;
+        home.played++;        away.played++;
+        home.goalsFor    += homeScore;   home.goalsAgainst += awayScore;
+        away.goalsFor    += awayScore;   away.goalsAgainst += homeScore;
+        if      (homeScore > awayScore) { home.wins++;   away.losses++; home.points += 3; }
+        else if (homeScore < awayScore) { away.wins++;   home.losses++; away.points += 3; }
+        else                            { home.draws++;  away.draws++;  home.points++; away.points++; }
+        return league;
+    }
+
+    // Simulate every UNPLAYED match in a round and apply each result to the
+    // league standings. `skipPredicate(match)` is given each match — return
+    // true to leave it alone (used to skip the user's already-played match).
+    // Mutates both `round.matches` and `league`. Returns the round.
+    static simulateRound(round, league, skipPredicate = () => false) {
+        if (!round?.matches) return round;
+        round.matches.forEach(m => {
+            if (m.played) return;
+            if (skipPredicate(m)) return;
+            const home = league.find(c => c.clubName === m.home);
+            const away = league.find(c => c.clubName === m.away);
+            const score = this.simulateScore(home?.budget || 60, away?.budget || 60);
+            m.homeScore = score.home;
+            m.awayScore = score.away;
+            m.played    = true;
+            this.applyResult(league, m.home, m.away, score.home, score.away);
+        });
+        return round;
     }
 
     // Sorts a league table by standard football criteria:

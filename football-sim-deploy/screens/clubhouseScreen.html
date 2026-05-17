@@ -38,6 +38,15 @@
                     <button class="ch-menu-item" data-clubhouse-action="office">
                         <span class="ch-icon">🪑</span><span>Manager's Office</span>
                     </button>
+
+                    <!-- Back / Forward pill — pinned to the bottom of the
+                         left menu. Drives the navigation stack just like
+                         the previous floating-nav did. -->
+                    <div class="ch-menu-nav" id="chMenuNav" aria-label="Navigation history">
+                        <button id="navBackBtn" class="fn-btn" disabled aria-label="Back" title="Back">‹</button>
+                        <span class="fn-label" id="navLabel">—</span>
+                        <button id="navFwdBtn"  class="fn-btn" disabled aria-label="Forward" title="Forward">›</button>
+                    </div>
                 </aside>
 
                 <main class="clubhouse-stage">
@@ -73,12 +82,34 @@
                         </div>
                     </div>
 
-                    <!-- Tactics & XI view: hosts the relocated managementScreen
-                         content (player list + formation pitch + tactic
-                         buttons). The DOM nodes get moved here once at boot
-                         via football-sim.js. -->
-                    <div class="ch-view ch-view-tactics" data-view="tactics">
-                        <div id="chTacticsHost"></div>
+                    <!-- (Tactics & XI is now an independent screen reached via
+                         the menu item, not an in-pane view.) -->
+
+                    <!-- Next match preview — shown when user clicks Play Next
+                         Match. Filled by _renderNextMatchView(): two crests,
+                         "vs", date, venue, and a Play button that triggers
+                         the fast-forward loading bar. -->
+                    <div class="ch-view ch-view-next-match" data-view="next-match">
+                        <div class="ch-view-head">
+                            <span>⚽</span>
+                            <span id="chNextMatchTitle">Next Match</span>
+                        </div>
+                        <div class="ch-nm-body" id="chNextMatchBody">
+                            <!-- Populated by _renderNextMatchView() -->
+                        </div>
+                    </div>
+
+                    <!-- Today's fixture results — landed on after a match
+                         finishes + the other 4 round matches are simulated.
+                         Filled by _renderTodaysFixturePanel(). -->
+                    <div class="ch-view ch-view-table" data-view="today-fixture">
+                        <div class="ch-view-head">
+                            <span>📋</span>
+                            <span id="chTodayTitle">Today's Results</span>
+                        </div>
+                        <div class="ch-view-body" id="chTodayBody">
+                            <!-- Populated by _renderTodaysFixturePanel() -->
+                        </div>
                     </div>
 
                     <!-- Squad view: full-width player list. Clicking a row

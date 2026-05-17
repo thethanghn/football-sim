@@ -18,13 +18,14 @@ class GameStorage {
 
     // Domain keys (joined with the prefix on read/write)
     static KEYS = {
-        settings:   'settings',
-        manager:    'manager',       // { name, nation, city, clubName, createdAt }
-        league:     'league',        // the generated 10-club league + standings
-        fixtures:   'fixtures',      // round-robin schedule for the season
-        playerTeam: 'playerTeam',
-        tactics:    'tactics',
-        history:    'history',
+        settings:    'settings',
+        manager:     'manager',       // { name, nation, city, clubName, createdAt }
+        league:      'league',        // the generated 10-club league + standings
+        fixtures:    'fixtures',      // round-robin schedule for the season
+        currentDate: 'currentDate',   // in-game calendar (YYYY-MM-DD)
+        playerTeam:  'playerTeam',
+        tactics:     'tactics',
+        history:     'history',
     };
 
     // ─── Availability check (cached) ────────────────────────────────────
@@ -101,6 +102,11 @@ class GameStorage {
     static loadFixtures() { return this._read(this.KEYS.fixtures); }
     static saveFixtures(rounds) { return this._write(this.KEYS.fixtures, rounds); }
 
+    // ─── In-game calendar ──────────────────────────────────────────────
+    // YYYY-MM-DD. The match flow advances this whenever a fixture is played.
+    static loadCurrentDate() { return this._read(this.KEYS.currentDate); }
+    static saveCurrentDate(iso) { return this._write(this.KEYS.currentDate, iso); }
+
     // ─── Player team snapshot ───────────────────────────────────────────
     // Expects a plain object produced by Team#serialize():
     //   { teamName, jerseyColor, clubName, crestSeed, players, formation }
@@ -142,6 +148,7 @@ class GameStorage {
         this._remove(this.KEYS.manager);
         this._remove(this.KEYS.league);
         this._remove(this.KEYS.fixtures);
+        this._remove(this.KEYS.currentDate);
         this._remove(this.KEYS.playerTeam);
         this._remove(this.KEYS.tactics);
         this._remove(this.KEYS.history);
