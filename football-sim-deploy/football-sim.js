@@ -167,6 +167,11 @@
                     element: null,        // Phaser Container (filled in once scene exists)
                     x: coords.x, y: coords.y, pitchX: x, pitchY: y,
                     staminaFill: null, staminaWidth: 16,
+                    // CM 03/04-style on-pitch player status — filled in below.
+                    ratingBg:    null,
+                    ratingText:  null,
+                    cardIcon:    null,
+                    injuryIcon:  null,
                 };
                 this.playerVisuals[playerId] = visual;
 
@@ -192,21 +197,95 @@
                     container.add(stamFill);
 
                     if (playerName) {
+                        // Bigger, more legible name pill — 14px text + wider pill.
                         const shortName = playerName.split(' ').pop();
-                        const approxW = shortName.length * 6.5 + 6;
-                        const nameBg = this.scene.add.rectangle(0, radius + 13, approxW, 18, 0x000000, 0.65)
+                        const approxW = shortName.length * 7.6 + 8;
+                        const nameBg = this.scene.add.rectangle(0, radius + 14, approxW, 20, 0x000000, 0.70)
+                            .setStrokeStyle(0.4, 0xffffff, 0.20)
                             .setOrigin(0.5);
                         container.add(nameBg);
-                        const nameText = this.scene.add.text(0, radius + 13, shortName, {
-                            fontFamily: 'Arial', fontStyle: 'bold', fontSize: '12px', color: '#ffffff'
+                        const nameText = this.scene.add.text(0, radius + 14, shortName, {
+                            fontFamily: 'Arial', fontStyle: 'bold', fontSize: '14px', color: '#ffffff'
                         }).setOrigin(0.5);
                         container.add(nameText);
                     }
 
+                    // ── Status badges ─────────────────────────────────────
+                    // Bigger, more readable chrome around the player circle.
+                    // Rating bubble (top-right) — colour-coded tier badge.
+                    const ratingBg = this.scene.add.rectangle(13, -radius - 5, 22, 13, 0xFACC15)
+                        .setStrokeStyle(0.8, 0x000000, 1)
+                        .setAlpha(0);
+                    container.add(ratingBg);
+                    const ratingText = this.scene.add.text(13, -radius - 5, '', {
+                        fontFamily: 'Arial', fontStyle: 'bold', fontSize: '11px', color: '#111111'
+                    }).setOrigin(0.5).setAlpha(0);
+                    container.add(ratingText);
+
+                    // Card icon (top-left) — small filled rectangle that looks
+                    // like a card. Yellow → 0xFACC15, red → 0xEF4444.
+                    const cardIcon = this.scene.add.rectangle(-13, -radius - 5, 7, 10, 0xFACC15)
+                        .setStrokeStyle(0.8, 0x000000, 1)
+                        .setAlpha(0);
+                    container.add(cardIcon);
+
+                    // Injury icon (bottom-right) — red cross built from two
+                    // crossed rectangles so it reads as a medical "+".
+                    const injuryV = this.scene.add.rectangle(12, radius, 2.5, 9, 0xEF4444)
+                        .setStrokeStyle(0.4, 0xffffff, 1).setAlpha(0);
+                    const injuryH = this.scene.add.rectangle(12, radius, 9, 2.5, 0xEF4444)
+                        .setStrokeStyle(0.4, 0xffffff, 1).setAlpha(0);
+                    container.add(injuryV);
+                    container.add(injuryH);
+
                     visual.element = container;
                     visual.staminaFill = stamFill;
+                    visual.ratingBg    = ratingBg;
+                    visual.ratingText  = ratingText;
+                    visual.cardIcon    = cardIcon;
+                    visual.injuryIcon  = { v: injuryV, h: injuryH };
                 });
                 return null;
+            }
+
+            // Live-update a player's rating badge (called from updateStats every
+            // few ticks). Pass rating = 0 to hide the badge.
+            updateRating(playerId, rating) {
+                const v = this.playerVisuals[playerId];
+                if (!v?.ratingBg || !v?.ratingText) return;
+                if (!rating || rating <= 0) {
+                    v.ratingBg.setAlpha(0);
+                    v.ratingText.setAlpha(0);
+                    return;
+                }
+                const c = rating < 5.5 ? 0xEF4444
+                        : rating < 6.5 ? 0xFB923C
+                        : rating < 7.5 ? 0xFACC15
+                        : rating < 8.5 ? 0x22C55E
+                        :                0x16A34A;
+                v.ratingBg.fillColor = c;
+                v.ratingBg.setAlpha(1);
+                v.ratingText.setText(rating.toFixed(1));
+                v.ratingText.setColor(rating < 6.5 ? '#ffffff' : '#111111');
+                v.ratingText.setAlpha(1);
+            }
+
+            // Show / hide the card icon. kind = 'yellow' | 'red' | null.
+            updateCardIcon(playerId, kind) {
+                const v = this.playerVisuals[playerId];
+                if (!v?.cardIcon) return;
+                if (!kind) { v.cardIcon.setAlpha(0); return; }
+                v.cardIcon.fillColor = (kind === 'red') ? 0xEF4444 : 0xFACC15;
+                v.cardIcon.setAlpha(1);
+            }
+
+            // Show / hide the injury cross.
+            updateInjuryIcon(playerId, on) {
+                const v = this.playerVisuals[playerId];
+                if (!v?.injuryIcon) return;
+                const a = on ? 1 : 0;
+                v.injuryIcon.v.setAlpha(a);
+                v.injuryIcon.h.setAlpha(a);
             }
 
             // Live-update a player's stamina bar (called from updateStats each tick).
@@ -875,6 +954,60 @@
                 return 'both';
             }
 
+            // ─── Kit colour helpers ─────────────────────────────────────────
+            // Hex ⇆ HSL conversion (small, no dependency).
+            static _hexToHsl(hex) {
+                const m = (hex || '').replace('#','').padStart(6,'0').match(/(..)(..)(..)/);
+                if (!m) return { h: 0, s: 1, l: 0.5 };
+                const r = parseInt(m[1],16)/255, g = parseInt(m[2],16)/255, b = parseInt(m[3],16)/255;
+                const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+                let h = 0; const l = (mx+mn)/2; const d = mx-mn;
+                const s = d === 0 ? 0 : d / (1 - Math.abs(2*l-1));
+                if (d !== 0) {
+                    if      (mx === r) h = 60 * (((g-b)/d) % 6);
+                    else if (mx === g) h = 60 * (((b-r)/d) + 2);
+                    else               h = 60 * (((r-g)/d) + 4);
+                }
+                if (h < 0) h += 360;
+                return { h, s, l };
+            }
+            static _hslToHex(h, s, l) {
+                const c = (1 - Math.abs(2*l-1)) * s;
+                const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+                const m = l - c/2;
+                let r=0,g=0,b=0;
+                if      (h < 60)  { r=c; g=x; b=0; }
+                else if (h < 120) { r=x; g=c; b=0; }
+                else if (h < 180) { r=0; g=c; b=x; }
+                else if (h < 240) { r=0; g=x; b=c; }
+                else if (h < 300) { r=x; g=0; b=c; }
+                else              { r=c; g=0; b=x; }
+                const to = v => Math.max(0, Math.min(255, Math.round((v+m)*255))).toString(16).padStart(2,'0');
+                return '#' + to(r) + to(g) + to(b);
+            }
+            // Derive a high-contrast away kit from the home colour.
+            // Approach: rotate hue by 180° (complementary), keep saturation
+            // strong, and flip lightness so a dark home → light away (and v.v.).
+            // Steer clear of pitch-green hues (90°–150°).
+            static computeAwayColor(homeHex) {
+                const { h, l } = Team._hexToHsl(homeHex);
+                let h2 = (h + 180) % 360;
+                if (h2 >= 90 && h2 <= 150) h2 = (h2 + 60) % 360;
+                const s2 = 0.85;
+                const l2 = l < 0.45 ? 0.85 : l > 0.65 ? 0.18 : 0.22;
+                return Team._hslToHex(h2, s2, l2);
+            }
+            // Two kits clash when they share roughly the same hue AND a similar
+            // lightness — referees would force a kit change in real football.
+            static colorsClash(hex1, hex2) {
+                const a = Team._hexToHsl(hex1);
+                const b = Team._hexToHsl(hex2);
+                const dh = Math.abs(a.h - b.h);
+                const hueDist = Math.min(dh, 360 - dh);
+                const lDist   = Math.abs(a.l - b.l);
+                return hueDist < 35 && lDist < 0.25;
+            }
+
             // Position-aware height (cm) using a Normal distribution per role profile.
             // GKs / CBs / target STs trend tall; wide midfielders / wingers trend shorter.
             static randomHeight(position) {
@@ -954,17 +1087,44 @@
                 return inst;
             }
 
+            // Back-fill the new CM 03/04-style fitness fields on legacy player
+            // objects loaded from storage:
+            //   - `condition`      → defaults to 100 (assume fresh-ish on load)
+            //   - `naturalFitness` → derived from `stamina` ±8 if missing
+            // Older saves had a single `stamina` field that doubled as both the
+            // attribute AND the live drained value, so any value < ~50 likely
+            // represents end-of-match fatigue rather than a low attribute.
+            // We clamp the imputed rating up to 60 in that case.
+            static _migratePlayer(p) {
+                if (!p) return p;
+                if (typeof p.condition !== 'number') p.condition = 100;
+                if (typeof p.naturalFitness !== 'number') {
+                    const stam = typeof p.stamina === 'number' ? Math.max(60, p.stamina) : 75;
+                    const jitter = Math.floor((Math.random() - 0.5) * 16); // ±8
+                    p.naturalFitness = Math.max(40, Math.min(95, stam + jitter));
+                }
+                // If `stamina` looks like a drained value, push it back up to the
+                // imputed rating so the attribute panel doesn't show a fatigued
+                // player as having a 20 stamina rating forever.
+                if (typeof p.stamina === 'number' && p.stamina < 50) {
+                    p.stamina = Math.max(p.stamina, p.naturalFitness - 5);
+                }
+                return p;
+            }
+
             constructor(teamName, excludedColor = null, restored = null, opts = {}) {
                 // Restore path — rehydrate from a snapshot produced by serialize().
                 // Crest SVG is regenerated from the seed (don't store ~10KB of markup).
                 if (restored) {
                     this.teamName    = restored.teamName;
                     this.jerseyColor = restored.jerseyColor;
+                    this.homeColor   = restored.homeColor || restored.jerseyColor;
+                    this.awayColor   = restored.awayColor || Team.computeAwayColor(restored.jerseyColor);
                     this.clubName    = restored.clubName;
                     this.crestSeed   = restored.crestSeed;
                     this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
                     this.crestSVGSm  = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 44);
-                    this.players     = Array.isArray(restored.players) ? restored.players : [];
+                    this.players     = (Array.isArray(restored.players) ? restored.players : []).map(Team._migratePlayer);
                     this.homeNation  = restored.homeNation || null;
                     this.budget      = restored.budget != null ? restored.budget : null;
                     this.startingXI  = [];
@@ -978,6 +1138,8 @@
                 const jerseyColors = ['#FF0000', '#0000FF', '#FFFF00', '#FF6600', '#FF00FF', '#00FFFF', '#FF4444'];
                 const available = excludedColor ? jerseyColors.filter(c => c !== excludedColor) : jerseyColors;
                 this.jerseyColor = available[Math.floor(Math.random() * available.length)];
+                this.homeColor   = this.jerseyColor;
+                this.awayColor   = Team.computeAwayColor(this.jerseyColor);
                 this.crestSeed   = Math.floor(Math.random() * 99999);
                 this.clubName    = CrestGenerator.generateName(this.crestSeed);
                 this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
@@ -1006,6 +1168,8 @@
                 return {
                     teamName:    this.teamName,
                     jerseyColor: this.jerseyColor,
+                    homeColor:   this.homeColor || this.jerseyColor,
+                    awayColor:   this.awayColor,
                     clubName:    this.clubName,
                     crestSeed:   this.crestSeed,
                     homeNation:  this.homeNation,   // { code, name, flag, first, last, format }
@@ -1087,6 +1251,11 @@
                     avatar: AvatarGenerator.generateAvatar(idx, jerseyColor),
                     instructions: Team.defaultInstructions(position),
                     morale: Team.randomMorale(),
+                    // CM 03/04-style match-day Condition (0–100, rolling). Drains
+                    // each tick during a match (scaled by `stamina` rating);
+                    // recovers each in-game day (scaled by `naturalFitness`).
+                    // Fresh players start fully fit.
+                    condition: 100,
                     // Per-match performance counters (live with the player; the spread used by
                     // setupSquad / subs keeps the same `stats` reference, so writes from any
                     // reference update the same object).
@@ -1120,6 +1289,26 @@
             // opts.homeNation  — SEA nation object. Most squad members will be
             //                    drawn from this nation; the rest are foreign.
             // opts.budget      — drives foreign quota + overall club quality.
+            // Deterministic position spread so every roster can field every
+            // formation (442, 433, 451, 532, 541, 352, 343) without leaning
+            // on out-of-position fallbacks. First 20 players follow the
+            // blueprint; any extras (depth) are sampled from DEPTH_POOL —
+            // weighted toward positions where a backup matters most.
+            static POSITION_BLUEPRINT = [
+                'GK', 'GK',                              // 2 keepers
+                'CB', 'CB', 'CB',                        // 3 centre-backs (covers 3CB + 4CB formations)
+                'LB', 'RB',                              // wide back-line
+                'LWB', 'RWB',                            // wing-backs for 5-back / 3-5-2 / 3-4-3
+                'CDM',                                   // anchor mid
+                'CM', 'CM',                              // central mid pair
+                'CAM',                                   // attacking mid
+                'LM', 'RM',                              // wide midfielders (4-5-1, 4-4-2)
+                'LW', 'RW',                              // inverted wingers for 433 / 343
+                'ST', 'ST',                              // strike partnership
+                'CF',                                    // second-striker / false-9
+            ];
+            static POSITION_DEPTH = ['CB','CB','CM','CM','ST','LB','RB','CDM','LM','RM','LW','RW'];
+
             static createRoster(jerseyColor, opts = {}) {
                 const count = opts.count != null ? opts.count : (20 + Math.floor(Math.random() * 6));
                 const home  = opts.homeNation || null;
@@ -1139,23 +1328,33 @@
                 };
 
                 const players = [];
+                const BP = Team.POSITION_BLUEPRINT;
+                const DEPTH = Team.POSITION_DEPTH;
                 for (let i = 0; i < count; i++) {
                     const useHome = homeUsable && (Math.random() >= foreignRatio);
                     const nation  = useHome ? home : null;         // null → pickNation() globally
                     const jitter  = Random.gaussianInt(0, 5, -8, 8);
                     const shift   = Math.max(-28, Math.min(28, clubQuality + rankShift(i) + jitter));
-                    players.push(Team.createPlayer(i, jerseyColor, { nation, qualityShift: shift }));
+                    // First 20 slots follow the blueprint so every position
+                    // in any supported formation is covered; extras (squad
+                    // depth) are sampled from DEPTH_POOL.
+                    const position = BP[i] || DEPTH[Math.floor(Math.random() * DEPTH.length)];
+                    players.push(Team.createPlayer(i, jerseyColor, { nation, qualityShift: shift, position }));
                 }
 
-                if (opts.isYouTeam && players[6]) {
-                    players[6] = {
-                        ...players[6],
+                // Slot 17 in POSITION_BLUEPRINT is already an ST — overwriting
+                // there preserves the rest of the roster's position coverage
+                // (the older code clobbered slot 6, which is now RB).
+                const vyySlot = 17;
+                if (opts.isYouTeam && players[vyySlot]) {
+                    players[vyySlot] = {
+                        ...players[vyySlot],
                         name: 'Nguyễn Thế Chí Vỹ',
                         flag: '🇻🇳',
                         nationality: 'Vietnamese',
                         position: 'ST',
                         // CM 03/04-style attributes
-                        pace: 89, stamina: 88, strength: 87,
+                        pace: 89, stamina: 88, naturalFitness: 90, condition: 100, strength: 87,
                         finishing: 92, composure: 90, offTheBall: 91,
                         vision: 78, creativity: 75, passing: 85,
                         dribbling: 82, crossing: 60, heading: 87,
@@ -1209,8 +1408,20 @@
                     CF:  { pace:[74,91],  stamina:[68,84],  strength:[68,85], finishing:[77,94],  composure:[75,92],  offTheBall:[73,90], vision:[60,79],  creativity:[64,82], passing:[60,79],  dribbling:[66,84], crossing:[39,58],  heading:[64,81],  tackling:[21,42],  marking:[18,39],  positioning:[64,82], reflexes:[8,22],   handling:[5,19],   determination:[70,87], anticipation:[66,84] },
                 };
 
+                // CM 03/04 "Natural Fitness" — drives between-match condition
+                // recovery (and lowers injury risk). Mild positional variation:
+                // wing-backs / box-to-box mids highest; GKs and pure forwards
+                // a tier lower. The static rating is independent of stamina —
+                // a player can have high in-match stamina but slow recovery.
+                const NF_RANGES = {
+                    GK:  [60, 78], CB:  [65, 82], LB:  [78, 92], RB:  [78, 92],
+                    LWB: [80, 94], RWB: [80, 94], CDM: [72, 88], CM:  [75, 90],
+                    CAM: [70, 86], LM:  [76, 90], RM:  [76, 90],
+                    LW:  [72, 88], RW:  [72, 88], ST:  [68, 84], CF:  [70, 85],
+                };
+
                 const profile = P[position] || P.CM;
-                const attrs = {};
+                const attrs = { naturalFitness: r(...(NF_RANGES[position] || [70, 86])) };
                 for (const [key, [lo, hi]] of Object.entries(profile)) {
                     attrs[key] = r(lo, hi);
                 }
@@ -1650,7 +1861,7 @@
                 this.substitutions = [];
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral'; // kept for legacy compat
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no', autoSubs: { onInjury: 'on', onStamina: 'off', onPerformance: 'off' } };
                 // Restore previously-saved tactics + formation if a career is in progress
                 const savedTactics = (typeof GameStorage !== 'undefined') ? GameStorage.loadTactics() : null;
                 if (savedTactics) {
@@ -2622,6 +2833,127 @@
                 menuBtn?.setAttribute('aria-expanded', 'false');
             }
 
+            // ─── Auto-substitution policies ─────────────────────────────────
+            // Three policies stored under this.tactics.autoSubs:
+            //   onInjury:    'on'  | 'off'
+            //   onStamina:   'off' | 'low' (<60) | 'critical' (<40)
+            //   onPerformance: 'off' | 'low' (<6.0) | 'critical' (<5.0)
+            // Evaluation runs each event tick (throttled), picks the best bench
+            // replacement, and executes the sub via _executeAutoSub.
+
+            _setAutoSub(key, value) {
+                if (!this.tactics.autoSubs) {
+                    this.tactics.autoSubs = { onInjury: 'on', onStamina: 'off', onPerformance: 'off' };
+                }
+                this.tactics.autoSubs[key] = value;
+                if (typeof GameStorage !== 'undefined') {
+                    GameStorage.saveTactics(this.tactics, this.playerFormation);
+                }
+                this.renderManagementPanel();
+            }
+
+            // Periodic poll — called from runMatch's event tick. Throttled to
+            // one evaluation every ~5 in-game minutes to avoid thrashing.
+            _evaluateAutoSubs() {
+                if (!this.isRunning || this.isPaused) return;
+                if (this.matchFlow?._kickoffMode) return;
+                if (!this.playerTeam || !this.cpuTeam) return;
+                if (!this.rules?.canSubstitute('player')) return;
+                if (!this.playerTeam.bench?.length) return;
+
+                const policy = this.tactics?.autoSubs || {};
+                const stamThreshold = policy.onStamina === 'low' ? 60
+                                    : policy.onStamina === 'critical' ? 40 : null;
+                const perfThreshold = policy.onPerformance === 'low' ? 6.0
+                                    : policy.onPerformance === 'critical' ? 5.0 : null;
+                if (!stamThreshold && !perfThreshold) return;
+
+                const minute = this.rules.getMatchMinute(this.timeRemaining);
+                if (this._lastAutoSubCheck != null && (minute - this._lastAutoSubCheck) < 5) return;
+                this._lastAutoSubCheck = minute;
+
+                for (const p of this.playerTeam.onField) {
+                    if (!this.rules.canSubstitute('player')) break;
+                    if (p.position === 'GK') continue;       // never auto-sub the keeper
+                    const liveMins = this._liveMinutesPlayed(p);
+                    if (liveMins < 20) continue;             // give them time first
+
+                    let reason = null;
+                    if (stamThreshold && (p.condition ?? 100) < stamThreshold) {
+                        reason = `stamina ${Math.round(p.condition ?? 100)}%`;
+                    }
+                    if (!reason && perfThreshold && liveMins >= 30) {
+                        // Bump banked minutes so the rating function (which
+                        // does its own >= 5 minutes check on stats.minutesPlayed)
+                        // sees the live count.
+                        const banked = p.stats.minutesPlayed;
+                        p.stats.minutesPlayed = liveMins;
+                        const rating = this._computePlayerRating(p, undefined, this.cpuScore);
+                        p.stats.minutesPlayed = banked;
+                        if (rating > 0 && rating < perfThreshold) {
+                            reason = `rating ${rating.toFixed(1)}`;
+                        }
+                    }
+                    if (!reason) continue;
+
+                    const replacement = this._pickAutoSubReplacement(p);
+                    if (!replacement) continue;
+
+                    this._executeAutoSub(p, replacement, reason, minute);
+                    return; // one sub per evaluation tick
+                }
+            }
+
+            // Bench-replacement picker: same natural position first, then same
+            // position family, then best-overall non-GK fallback. Excludes GKs
+            // since we never auto-sub the keeper.
+            _pickAutoSubReplacement(playerOut) {
+                const bench = this.playerTeam?.bench || [];
+                if (!bench.length) return null;
+                const FAMILY = {
+                    CB:'def', LB:'def', RB:'def', LWB:'def', RWB:'def',
+                    CDM:'def', CM:'mid', CAM:'mid', LM:'wide', RM:'wide',
+                    LW:'wide', RW:'wide', ST:'fwd', CF:'fwd',
+                };
+                const bestBy = (pool) => pool.slice().sort((a, b) => this.calculateOverall(b) - this.calculateOverall(a))[0] || null;
+
+                const sameNatural = bench.filter(b => b.naturalPosition === playerOut.naturalPosition);
+                if (sameNatural.length) return bestBy(sameNatural);
+
+                const fam = FAMILY[playerOut.naturalPosition];
+                const sameFamily = bench.filter(b => b.naturalPosition !== 'GK' && FAMILY[b.naturalPosition] === fam);
+                if (sameFamily.length) return bestBy(sameFamily);
+
+                const others = bench.filter(b => b.naturalPosition !== 'GK');
+                return bestBy(others);
+            }
+
+            // Mirror of confirmSubstitution but driven by the auto-sub policy.
+            // Asymmetry preserved: incoming player goes onField as a spread copy
+            // with isOnField:true; outgoing keeps its original reference on the
+            // bench so its stats survive intact.
+            _executeAutoSub(playerOut, playerIn, reason, minute) {
+                const outIndex = this.playerTeam.onField.findIndex(p => p.id === playerOut.id);
+                if (outIndex === -1) return;
+                this.playerTeam.onField[outIndex] = { ...playerIn, isOnField: true };
+                const inIndex = this.playerTeam.bench.findIndex(p => p.id === playerIn.id);
+                if (inIndex !== -1) this.playerTeam.bench[inIndex] = playerOut;
+                playerOut.position = playerOut.naturalPosition || playerOut.position;
+                this.playerTeam.assignSlotPositions(this.playerFormation);
+
+                this.rules.recordSub('player');
+                this.substitutions.push({ team: 'player', playerOut: playerOut.name, playerIn: playerIn.name, time: `${minute}'` });
+                this.addEvent(
+                    `🤖 Auto-sub (${minute}'): <b class="ev-name">${playerOut.name}</b> off — ${reason}. <b class="ev-name">${playerIn.name}</b> on.`,
+                    'tackle', 'player', 'medium'
+                );
+                this._statSubOff(playerOut);
+                this._statSubOn(playerIn);
+                this._refreshMatchFlowPlayerInfo();
+                this.renderManagementPanel();
+                this._renderSubsStrip?.();   // instant chip update, don't wait a tick
+            }
+
             // Wire delegated click handlers for every mounted .mgmt-panel.
             // Formation + tactic buttons are inside each panel scope, so we
             // bind once at boot per panel root via event delegation. Keeps
@@ -2639,6 +2971,12 @@
                         const tb = e.target.closest('.tactic-btn');
                         if (tb && tb.dataset.tactic) {
                             this.setTactic(tb.dataset.tactic, tb.dataset.value);
+                            return;
+                        }
+                        // Auto-sub policy buttons share the .tactic-btn style
+                        // but carry data-autosub instead of data-tactic.
+                        if (tb && tb.dataset.autosub) {
+                            this._setAutoSub(tb.dataset.autosub, tb.dataset.value);
                             return;
                         }
                         const closeX = e.target.closest('.player-detail-close-btn');
@@ -2993,10 +3331,13 @@
                     if (p < 1) {
                         requestAnimationFrame(tick);
                     } else {
-                        // Advance and persist the calendar to the match day
+                        // Advance and persist the calendar to the match day,
+                        // then recover everyone's condition over the days that
+                        // just elapsed (user team + every league club roster).
                         if (typeof GameStorage !== 'undefined' && endISO) {
                             GameStorage.saveCurrentDate(endISO);
                         }
+                        this._recoverConditionOverDays(totalDays);
                         this._refreshDateLabel();
                         overlay.classList.remove('active');
                         overlay.setAttribute('aria-hidden', 'true');
@@ -3156,24 +3497,204 @@
                 const bench   = this.playerTeam.players.filter(p => isBench(p.id) && !isOn(p.id));
                 const others  = this.playerTeam.players.filter(p => !isOn(p.id) && !isBench(p.id));
 
+                // Tab dispatch — default 'attributes'. Tab buttons live in the
+                // ch-view-head; wired below so switching re-renders in place.
+                if (!this._squadTab) this._squadTab = 'attributes';
+                document.querySelectorAll('.ch-squad-tab').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.squadTab === this._squadTab);
+                    // Re-bind by clone to keep listeners idempotent.
+                    const fresh = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(fresh, btn);
+                    fresh.addEventListener('click', () => {
+                        this._squadTab = fresh.dataset.squadTab;
+                        this._renderClubhouseSquad();
+                    });
+                });
+                listEl.classList.toggle('squad-tab-performance', this._squadTab === 'performance');
+
+                // CM 03/04-style attribute grid. Columns chosen to mirror the
+                // canonical squad-attributes view: identity → summary → physical →
+                // technical → mental → defensive → goalkeeping → fitness.
+                // Each attribute cell is colour-tiered by value via `_attTone`.
+                const COLS_ATTRIBUTES = [
+                    // [key, label, group ('id' | 'sum' | 'phy' | 'tec' | 'men' | 'def' | 'gk' | 'fit')]
+                    ['num',  '#',   'id'],
+                    ['name', 'Name','id'],
+                    ['pos',  'Pos', 'id'],
+                    ['age',  'Age', 'id'],
+                    ['ovr',  'OVR', 'sum'],
+                    ['pace',     'Pac', 'phy'],
+                    ['stamina',  'Stm', 'phy'],
+                    ['strength', 'Str', 'phy'],
+                    ['finishing','Fin', 'tec'],
+                    ['passing',  'Pas', 'tec'],
+                    ['dribbling','Drb', 'tec'],
+                    ['crossing', 'Crs', 'tec'],
+                    ['heading',  'Hed', 'tec'],
+                    ['tackling', 'Tck', 'def'],
+                    ['marking',  'Mrk', 'def'],
+                    ['positioning','Pos','def'],
+                    ['vision',     'Vis','men'],
+                    ['creativity', 'Cre','men'],
+                    ['offTheBall', 'OtB','men'],
+                    ['composure',  'Cmp','men'],
+                    ['determination','Det','men'],
+                    ['anticipation', 'Ant','men'],
+                    ['reflexes', 'Ref', 'gk'],
+                    ['handling', 'Hnd', 'gk'],
+                    ['condition',     'Cnd','fit'],
+                    ['naturalFitness','NF', 'fit'],
+                    ['form',          'Form','form'],   // Rolling avg of last 10 ratings
+                ];
+
+                // Performance columns — career-stat aggregates (filled by
+                // _mergeMatchStatsIntoCareer at endMatch). Shared identity
+                // columns first, then Apps / Min / Gls / Asst (totals) and
+                // averages per match where they make more sense.
+                const COLS_PERFORMANCE = [
+                    ['num',  '#',    'id'],
+                    ['name', 'Name', 'id'],
+                    ['pos',  'Pos',  'id'],
+                    ['age',  'Age',  'id'],
+                    ['apps',     'App', 'count'],
+                    ['minutes',  'Min', 'count'],
+                    ['goals',    'Gls', 'count'],
+                    ['assists',  'Ast', 'count'],
+                    ['shots',    'Sht', 'count'],
+                    ['shotsOnTarget','SoT','count'],
+                    ['tackles',  'Tck', 'count'],
+                    ['fouls',    'Fls', 'count'],
+                    ['yellowCards','Y', 'card-y'],
+                    ['redCards','R',   'card-r'],
+                    ['shotsPerMatch','Sht/M','avg'],
+                    ['tacklesPerMatch','Tck/M','avg'],
+                    ['passPct',  'Pas%','passpct'],
+                    ['avgRating','Avg', 'rating'],
+                    ['form',     'Form','form'],
+                ];
+
+                const COLS = (this._squadTab === 'performance') ? COLS_PERFORMANCE : COLS_ATTRIBUTES;
+
+                const attTone = (v) => {
+                    if (v == null) return 'att-na';
+                    if (v >= 85) return 'att-elite';
+                    if (v >= 75) return 'att-good';
+                    if (v >= 65) return 'att-ok';
+                    if (v >= 55) return 'att-low';
+                    return 'att-poor';
+                };
+
+                const headerHtml = `<div class="ch-squad-head">` +
+                    COLS.map(([key, lbl, group]) => {
+                        const cls = `csh-${key} csh-grp-${group}`;
+                        return `<span class="${cls}">${lbl}</span>`;
+                    }).join('') +
+                `</div>`;
+
+                // 1–10 rating tier → colour class for the Form / Avg cells.
+                const ratingTone = (v) => {
+                    if (v == null) return 'att-na';
+                    if (v >= 7.5) return 'att-elite';
+                    if (v >= 7.0) return 'att-good';
+                    if (v >= 6.5) return 'att-ok';
+                    if (v >= 6.0) return 'att-low';
+                    return 'att-poor';
+                };
+
+                // Pass% colour scale (0–100 %).
+                const passPctTone = (pct) => {
+                    if (pct == null) return 'att-na';
+                    if (pct >= 90) return 'att-elite';
+                    if (pct >= 82) return 'att-good';
+                    if (pct >= 72) return 'att-ok';
+                    if (pct >= 60) return 'att-low';
+                    return 'att-poor';
+                };
+
+                const cellHtml = (p, [key, _lbl, group]) => {
+                    // Identity columns are shared by both tabs.
+                    if (group === 'id') {
+                        if (key === 'num')  return `<span class="csc-num">${p.number ?? '·'}</span>`;
+                        if (key === 'name') {
+                            const flag = p.flag ? `<span class="csc-flag">${p.flag}</span>` : '';
+                            return `<span class="csc-name">${flag}${p.name}</span>`;
+                        }
+                        if (key === 'pos')  return `<span class="csc-pos">${this._positionDisplay(p)}</span>`;
+                        if (key === 'age')  return `<span class="csc-age">${p.age ?? '·'}</span>`;
+                    }
+
+                    // ── Performance-tab cells ─────────────────────────────
+                    if (group === 'count' || group === 'card-y' || group === 'card-r' || group === 'avg' || group === 'passpct' || group === 'rating') {
+                        const c = p.career || {};
+                        const apps = c.appearances || 0;
+                        if (key === 'apps')           return `<span class="csc-att csc-count">${apps || '·'}</span>`;
+                        if (key === 'minutes')        return `<span class="csc-att csc-count">${c.minutes || '·'}</span>`;
+                        if (key === 'goals')          return `<span class="csc-att csc-count">${c.goals   || '·'}</span>`;
+                        if (key === 'assists')        return `<span class="csc-att csc-count">${c.assists || '·'}</span>`;
+                        if (key === 'shots')          return `<span class="csc-att csc-count">${c.shots   || '·'}</span>`;
+                        if (key === 'shotsOnTarget')  return `<span class="csc-att csc-count">${c.shotsOnTarget || '·'}</span>`;
+                        if (key === 'tackles')        return `<span class="csc-att csc-count">${c.tackles || '·'}</span>`;
+                        if (key === 'fouls')          return `<span class="csc-att csc-count">${c.fouls   || '·'}</span>`;
+                        if (key === 'yellowCards') {
+                            const y = c.yellowCards || 0;
+                            return `<span class="csc-att csc-count ${y > 0 ? 'card-y-tone' : 'att-na'}">${y || '·'}</span>`;
+                        }
+                        if (key === 'redCards') {
+                            const r = c.redCards || 0;
+                            return `<span class="csc-att csc-count ${r > 0 ? 'card-r-tone' : 'att-na'}">${r || '·'}</span>`;
+                        }
+                        if (key === 'shotsPerMatch') {
+                            const v = apps ? (c.shots || 0) / apps : null;
+                            return `<span class="csc-att csc-avg">${v != null ? v.toFixed(1) : '·'}</span>`;
+                        }
+                        if (key === 'tacklesPerMatch') {
+                            const v = apps ? (c.tackles || 0) / apps : null;
+                            return `<span class="csc-att csc-avg">${v != null ? v.toFixed(1) : '·'}</span>`;
+                        }
+                        if (key === 'passPct') {
+                            const passes = c.passes || 0;
+                            const pct = passes > 0 ? Math.round((c.passesCompleted || 0) / passes * 100) : null;
+                            const display = pct == null ? '·' : `${pct}%`;
+                            return `<span class="csc-att csc-passpct ${passPctTone(pct)}">${display}</span>`;
+                        }
+                        if (key === 'avgRating') {
+                            const avg = this._averageForm(p);
+                            const display = avg == null ? '·' : avg.toFixed(1);
+                            return `<span class="csc-att csc-avg-rating ${ratingTone(avg)}">${display}</span>`;
+                        }
+                    }
+
+                    // ── Attributes-tab cells ──────────────────────────────
+                    if (key === 'ovr') {
+                        const ovr = Math.round(p.overall || this.calculateOverall(p) || 60);
+                        return `<span class="csc-att csc-ovr ${attTone(ovr)}">${ovr}</span>`;
+                    }
+                    if (group === 'form') {
+                        // Show the last 5 ratings as a hyphen-joined sequence
+                        // (oldest → newest, left → right) e.g. "6-7-6-8-9".
+                        // Each digit is the rating rounded to nearest integer;
+                        // the cell colour reflects the most recent rating, since
+                        // that's what "current form" means.
+                        const list = Array.isArray(p.formRatings) ? p.formRatings.slice(-5) : [];
+                        if (!list.length) {
+                            return `<span class="csc-att csc-form att-na" title="No matches played yet">·</span>`;
+                        }
+                        const display = list.map(r => Math.round(r)).join('-');
+                        const latest  = list[list.length - 1];
+                        const avg     = this._averageForm(p);
+                        const tip     = `Last ${list.length} ratings — avg ${avg?.toFixed(1) ?? '–'}`;
+                        return `<span class="csc-att csc-form ${ratingTone(latest)}" title="${tip}">${display}</span>`;
+                    }
+                    const v = (typeof p[key] === 'number') ? Math.round(p[key]) : null;
+                    // Dim GK-only attributes for outfielders (they're irrelevant)
+                    const dim = (group === 'gk' && p.position !== 'GK') ? ' csc-dim' : '';
+                    const display = v == null ? '·' : v;
+                    return `<span class="csc-att ${attTone(v)}${dim}">${display}</span>`;
+                };
+
                 const rowHtml = (p) => {
-                    const ovr = Math.round(p.overall || 60);
-                    const ovrCls = ovr >= 90 ? 'ovr-90' : ovr >= 80 ? 'ovr-80'
-                                 : ovr >= 70 ? 'ovr-70' : ovr >= 60 ? 'ovr-60'
-                                 : ovr >= 50 ? 'ovr-50' : 'ovr-40';
-                    const flag = p.flag ? `<span class="csr-flag">${p.flag}</span>` : '';
-                    // Portrait avatar — face + neck, no jersey/arms, so the head reads
-                    // clearly at a small size. Bigger circle (44px) for legibility.
-                    const av = (typeof AvatarGenerator !== 'undefined' && p.avatar)
-                        ? AvatarGenerator.createHeadSVG(p.avatar, 44)
-                        : '';
-                    return `<div class="ch-squad-row" data-player-id="${p.id}">
-                        <span class="csr-num">${p.number ?? '·'}</span>
-                        <span class="csr-avatar">${av}</span>
-                        <span class="csr-name">${p.name}${flag}</span>
-                        <span class="csr-pos">${this._positionDisplay(p)}</span>
-                        <span class="csr-ovr ${ovrCls}">${ovr}</span>
-                    </div>`;
+                    const cells = COLS.map(col => cellHtml(p, col)).join('');
+                    return `<div class="ch-squad-row" data-player-id="${p.id}">${cells}</div>`;
                 };
 
                 const section = (label, group) => group.length
@@ -3181,6 +3702,7 @@
                     : '';
 
                 listEl.innerHTML =
+                    headerHtml +
                     section('Starting XI',  xi) +
                     section('Bench',        bench) +
                     section('Reserves',     others);
@@ -3240,10 +3762,14 @@
                     overlay.classList.add('active');
                     overlay.setAttribute('aria-hidden', 'false');
                 }
-                // Auto-scroll the row into view so navigating off-screen still
-                // keeps the list context visible.
+                // Swap the squad pane to detail mode — hides the table + tabs
+                // so the player detail takes the whole pane instead of being
+                // nested inside the grid.
+                document.querySelector('.ch-view-squad')?.classList.add('is-detail');
+                // Row-scroll no longer needed (the list is hidden), but keep
+                // the call cheap-noop for the case where the user toggles back.
                 document.querySelector(`.ch-squad-row[data-player-id="${player.id}"]`)
-                    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    ?.scrollIntoView({ block: 'nearest' });
             }
 
             // Move to the previous / next player in the displayed squad order.
@@ -3282,6 +3808,8 @@
                     overlay.classList.remove('active');
                     overlay.setAttribute('aria-hidden', 'true');
                 }
+                // Restore the squad list + tab switch.
+                document.querySelector('.ch-view-squad')?.classList.remove('is-detail');
                 // Drop the "selected" highlight on whichever row was active
                 document.querySelectorAll('.ch-squad-row.selected').forEach(r => r.classList.remove('selected'));
             }
@@ -3630,6 +4158,8 @@
                     p.stats.minutesPlayed   = 0;
                     p.stats.subbedOnMinute  = null;
                     p.stats.rating          = 0;   // 1–10, computed at endMatch
+                    // Clear any leftover in-match injury flag from a previous game.
+                    p.injuryUntil = null;
                 };
                 this.playerTeam?.players?.forEach(reset);
                 this.cpuTeam?.players?.forEach(reset);
@@ -3643,26 +4173,106 @@
                 player.stats[key] = (player.stats[key] || 0) + n;
             }
 
-            // After a match ends, fold each player's per-match goalsScored /
-            // assistsGiven into their career goals / assists counters.
-            // Necessary because the in-match increments at goalEvent target the
-            // shallow-copied onField player (`{...p, isOnField:true}`), so the
-            // canonical roster's top-level p.goals / p.assists don't update
-            // automatically. p.stats is shared by reference (see setupSquad),
-            // so reading `p.stats.goalsScored` here gets the per-match total.
+            // CM 03/04-style between-match condition recovery. Called when the
+            // calendar advances (today: in _fastForwardToMatch over the days
+            // between current date and kickoff). Recovery per day scales with
+            // naturalFitness:
+            //
+            //   perDay = 8 + naturalFitness / 3      (≈ 18–35 % per day)
+            //
+            // Applied to every player on every roster the user can see — their
+            // own playerTeam plus every league club's persistent CPU roster —
+            // capped at 100. Then persists the updated league + playerTeam so
+            // the recovered values survive a reload.
+            _recoverConditionOverDays(days) {
+                if (!days || days < 1) return;
+                const bumpRoster = (players) => {
+                    if (!Array.isArray(players)) return;
+                    players.forEach(p => {
+                        if (typeof p.condition !== 'number') p.condition = 100;
+                        const nf = p.naturalFitness || 75;
+                        const perDay = 8 + nf / 3;
+                        p.condition = Math.min(100, p.condition + perDay * days);
+                    });
+                };
+                bumpRoster(this.playerTeam?.players);
+                if (typeof GameStorage !== 'undefined') {
+                    const league = GameStorage.loadLeague();
+                    if (Array.isArray(league)) {
+                        league.forEach(c => bumpRoster(c.players));
+                        GameStorage.saveLeague(league);
+                    }
+                    if (this.playerTeam) {
+                        GameStorage.savePlayerTeam(this.playerTeam.serialize());
+                    }
+                }
+            }
+
+            // After a match ends, fold this match's per-player stats into
+            // the player's persistent career totals. Two layers:
+            //   p.goals / p.assists  — legacy top-level counters (kept in sync)
+            //   p.career             — full career stat object for the
+            //                          Clubhouse Squad → Performance tab.
+            //
+            // p.stats is shared by reference across the onField shallow copy
+            // (see setupSquad), so reading p.stats.* here returns the genuine
+            // per-match totals for both starters and players who came on.
             _mergeMatchStatsIntoCareer(teamObj) {
                 if (!teamObj?.players) return;
                 teamObj.players.forEach(p => {
-                    const g = p.stats?.goalsScored  || 0;
-                    const a = p.stats?.assistsGiven || 0;
+                    const s = p.stats || {};
+                    const mins = s.minutesPlayed || 0;
+                    if (!mins) return;     // didn't feature — nothing to add
+
+                    // Legacy top-level counters
+                    const g = s.goalsScored  || 0;
+                    const a = s.assistsGiven || 0;
                     if (g) p.goals   = (p.goals   || 0) + g;
                     if (a) p.assists = (p.assists || 0) + a;
+
+                    // Career-stat aggregate
+                    if (!p.career) p.career = {
+                        appearances: 0, minutes: 0,
+                        goals: 0, assists: 0,
+                        shots: 0, shotsOnTarget: 0,
+                        tackles: 0, fouls: 0,
+                        yellowCards: 0, redCards: 0,
+                        passes: 0, passesCompleted: 0,
+                        dribbles: 0, duelsWon: 0,
+                    };
+                    p.career.appearances     += 1;
+                    p.career.minutes         += mins;
+                    p.career.goals           += g;
+                    p.career.assists         += a;
+                    p.career.shots           += s.shots           || 0;
+                    p.career.shotsOnTarget   += s.shotsOnTarget   || 0;
+                    p.career.tackles         += s.tackles         || 0;
+                    p.career.fouls           += s.fouls           || 0;
+                    p.career.yellowCards     += s.yellowCards     || 0;
+                    p.career.redCards        += s.redCards        || 0;
+                    p.career.passes          += s.passes          || 0;
+                    p.career.passesCompleted += s.passesCompleted || 0;
+                    p.career.dribbles        += s.dribbles        || 0;
+                    p.career.duelsWon        += s.duelsWon        || 0;
                 });
             }
 
             _statSubOn(player) {
                 if (!player?.stats) return;
                 player.stats.subbedOnMinute = this.rules.getMatchMinute(this.timeRemaining);
+            }
+
+            // Live "minutes-on-pitch" for a player, including the in-flight
+            // stretch since they last came on. stats.minutesPlayed alone only
+            // increments on subbedOff — so a starter who's been on the whole
+            // match would otherwise show 0 until they leave.
+            _liveMinutesPlayed(player) {
+                if (!player?.stats) return 0;
+                const banked  = player.stats.minutesPlayed || 0;
+                const onSince = player.stats.subbedOnMinute;
+                if (onSince == null) return banked;
+                const now = this.rules?.getMatchMinute?.(this.timeRemaining) ?? 0;
+                return banked + Math.max(0, now - onSince);
             }
 
             _statSubOff(player) {
@@ -3673,57 +4283,106 @@
                 }
             }
 
-            // CM 03/04-style 1.0–10.0 match rating, computed from in-match stats.
-            // Inputs: the player, whether the player's team won (true/false/null=draw).
-            // Caller is expected to set `player.stats.rating` from this.
-            _computePlayerRating(player, teamWon) {
+            // CM 03/04-style 1.0–10.0 match rating, computed from in-match
+            // stats. Position-weighted (defenders rewarded for clean sheets;
+            // attackers rewarded harder for goals; passing matters more for
+            // mids), and shifted by team-result on full-time.
+            //
+            // Args:
+            //   player         — must have .stats and .position / .naturalPosition
+            //   teamWon        — true / false / null=draw / undefined=mid-match
+            //   teamConceded   — goals conceded by the player's team (for the
+            //                    clean-sheet bonus; mid-match: live count)
+            _computePlayerRating(player, teamWon, teamConceded) {
                 if (!player?.stats) return 0;
                 const s = player.stats;
                 if ((s.minutesPlayed || 0) < 5) return 0;     // didn't really feature
 
-                let r = 6.0;                                  // baseline (decent performance)
+                const pos = player.naturalPosition || player.position;
+                const isGK  = pos === 'GK';
+                const isDef = !isGK && ['CB','LB','RB','LWB','RWB','CDM'].includes(pos);
+                const isMid = ['CM','CAM','LM','RM','LW','RW'].includes(pos);
+                const isAtk = ['ST','CF'].includes(pos);
 
-                // Attacking contributions
-                r += (s.goalsScored  || 0) * 1.00;
-                r += (s.assistsGiven || 0) * 0.45;
-                r += Math.min(0.60, (s.shotsOnTarget || 0) * 0.15);
-                r += Math.min(0.50, (s.dribbles      || 0) * 0.10);
+                // Baseline — CM 03/04-style: GK/Def average a hair below mid/atk.
+                // Mirrors community-observed ~6.7-6.8 average for the team.
+                let r = isGK ? 6.7 : isDef ? 6.5 : isMid ? 6.6 : 6.7;
 
-                // Passing — reward completion vs a 65% baseline
-                if ((s.passes || 0) > 0) {
+                // ── Attacking contributions, scaled by how attacking the role is ──
+                const atkWeight = isGK ? 0.30 : isDef ? 0.60 : isMid ? 1.00 : 1.20;
+                r += (s.goalsScored  || 0) * 1.10 * atkWeight;
+                r += (s.assistsGiven || 0) * 0.55 * atkWeight;
+                r += Math.min(0.50, (s.shotsOnTarget || 0) * 0.12) * atkWeight;
+                r += Math.min(0.45, (s.dribbles      || 0) * 0.09);
+
+                // ── Passing — completion above a 70 % baseline; mids care more ──
+                if ((s.passes || 0) >= 4) {
                     const pct = (s.passesCompleted || 0) / s.passes;
-                    r += Math.max(-1.0, Math.min(1.0, (pct - 0.65) * 1.6));
+                    const passWeight = isMid ? 1.20 : 1.00;
+                    r += Math.max(-1.0, Math.min(1.0, (pct - 0.70) * 1.4)) * passWeight;
                 }
 
-                // Defensive contributions
-                r += Math.min(0.70, (s.tackles  || 0) * 0.12);
-                r += Math.min(0.40, (s.duelsWon || 0) * 0.06);
+                // ── Defensive contributions, scaled by how defensive the role is ──
+                const defWeight = isGK ? 0.40 : isDef ? 1.30 : isMid ? 0.90 : 0.50;
+                r += Math.min(0.80, (s.tackles  || 0) * 0.13) * defWeight;
+                r += Math.min(0.50, (s.duelsWon || 0) * 0.07) * defWeight;
 
-                // Discipline penalties
+                // ── Clean-sheet bonus / leaky-defence penalty (DEF + GK) ──
+                // Applied at full-time only (teamWon != null) so mid-match
+                // ratings don't oscillate when the opponent scores.
+                if (teamWon != null && (isDef || isGK) && typeof teamConceded === 'number') {
+                    if (teamConceded === 0)      r += isGK ? 0.85 : 0.45;
+                    else if (teamConceded === 1) r += isGK ? 0.10 : 0.05;
+                    else if (teamConceded >= 3)  r -= isGK ? 0.70 : 0.30;
+                }
+
+                // ── Discipline ──
                 r -= (s.fouls       || 0) * 0.12;
                 r -= (s.yellowCards || 0) * 0.40;
-                r -= (s.redCards    || 0) * 1.50;
+                r -= (s.redCards    || 0) * 2.00;
 
-                // Team-result bonus / penalty
-                if (teamWon === true)  r += 0.35;
+                // ── Team-result modifier (full-time only) ──
+                if (teamWon === true)       r += 0.30;
                 else if (teamWon === false) r -= 0.20;
 
-                return Math.max(3.0, Math.min(10.0, Math.round(r * 10) / 10));   // 1 decimal
+                return Math.max(3.0, Math.min(10.0, Math.round(r * 10) / 10));
             }
 
             // Computes rating for every player on both squads that featured
-            // (minutesPlayed > 0). Called once at endMatch. Stores back into
-            // player.stats.rating.
+            // (minutesPlayed > 0). Called once at endMatch. Also appends each
+            // user-team starter's rating to their rolling form history so the
+            // Form column in the Clubhouse squad view updates.
             _computeAllRatings() {
                 const ps = this.playerScore, cs = this.cpuScore;
                 const playerWon = ps === cs ? null : ps > cs;
                 const cpuWon    = ps === cs ? null : cs > ps;
                 this.playerTeam?.players?.forEach(p => {
-                    p.stats.rating = this._computePlayerRating(p, playerWon);
+                    p.stats.rating = this._computePlayerRating(p, playerWon, cs);
+                    this._recordFormRating(p, p.stats.rating);
                 });
                 this.cpuTeam?.players?.forEach(p => {
-                    p.stats.rating = this._computePlayerRating(p, cpuWon);
+                    p.stats.rating = this._computePlayerRating(p, cpuWon, ps);
+                    this._recordFormRating(p, p.stats.rating);
                 });
+            }
+
+            // Append a non-zero rating to the player's rolling form history,
+            // capped at the most recent 10 matches. Persists with the player.
+            _recordFormRating(player, rating) {
+                if (!player || !rating) return;
+                if (!Array.isArray(player.formRatings)) player.formRatings = [];
+                player.formRatings.push(rating);
+                if (player.formRatings.length > 10) {
+                    player.formRatings = player.formRatings.slice(-10);
+                }
+            }
+
+            // Average of the player's last N form ratings; null when no history.
+            _averageForm(player) {
+                const list = Array.isArray(player?.formRatings) ? player.formRatings : null;
+                if (!list || !list.length) return null;
+                const sum = list.reduce((a, b) => a + b, 0);
+                return Math.round((sum / list.length) * 10) / 10;
             }
 
             // Close out minutes for anyone still on the field — called at endMatch.
@@ -4187,6 +4846,34 @@
                     this.isPreMatch = false;
                     this._inMatch   = true;       // gate clubhouse access until match ends
                     this.rules.reset();
+                    // Wipe everything tied to the previous match so the HUD
+                    // reads zero from kickoff onwards. reset() handles this
+                    // when the user clicks "Back to Clubhouse", but a fresh
+                    // match started from any other entry point would otherwise
+                    // inherit stale score / goals / substitutions / stats.
+                    this.playerScore       = 0;
+                    this.cpuScore          = 0;
+                    this.timeRemaining     = 60;
+                    this.goals             = [];
+                    this.substitutions     = [];
+                    this.cardData          = { player: [], cpu: [] };
+                    this.momentum          = 50;
+                    this._attackPhase      = null;
+                    this._attackTeam       = null;
+                    this._phaseTicks       = 0;
+                    this._lastAutoSubCheck = null;
+                    this.stats = {
+                        playerShots: 0, cpuShots: 0,
+                        playerShotsOnTarget: 0, cpuShotsOnTarget: 0,
+                        playerTackles: 0, cpuTackles: 0,
+                        playerPasses: 0, cpuPasses: 0,
+                        playerPassesCompleted: 0, cpuPassesCompleted: 0,
+                        playerCorners: 0, cpuCorners: 0,
+                        playerFouls: 0, cpuFouls: 0,
+                        playerOffsides: 0, cpuOffsides: 0,
+                        playerFreeKicks: 0, cpuFreeKicks: 0,
+                        playerPossession: 50, cpuPossession: 50,
+                    };
                     // Persist the player team + tactics now so any mid-match
                     // adjustments (instructions, customPos drags) survive a reload.
                     if (typeof GameStorage !== 'undefined' && this.playerTeam) {
@@ -4214,6 +4901,10 @@
                         `${this.playerTeam.crestSVG}<div class="match-team-name">${this.playerTeam.clubName}</div>`;
                     document.getElementById('cpuTeamDisplay').innerHTML =
                         `${this.cpuTeam.crestSVG}<div class="match-team-name">${this.cpuTeam.clubName}</div>`;
+                    // Match meta strip (competition · round · date · venue) +
+                    // empty scorer strips ready to be filled by goal events.
+                    this._renderMatchMeta();
+                    this._renderScorerStrip();
 
                     // Show manage team button during match
                     document.getElementById('manageBtn').style.display = 'block';
@@ -4230,6 +4921,10 @@
                     console.log('Pitch players set up');
 
                     this._initPlayerStats();   // reset per-player performance counters
+                    // Push the freshly-zeroed state into the DOM right away
+                    // so the first frame the user sees shows 0–0 / blank
+                    // scorers / blank subs, instead of last match's leftovers.
+                    this.updateUI();
                     this.isRunning = true;
                     console.log('Starting match...');
                     this.audio?.whistle(true);  // kick-off whistle
@@ -4359,7 +5054,15 @@
                         if (typeof LeagueGenerator !== 'undefined' && homeNation) {
                             LeagueGenerator.ensureRoster(club, homeNation);
                         }
-                        const cpu = new Team('CPU', this.playerTeam.jerseyColor, null, {
+                        // Pick the CPU's match-day kit: default to their home
+                        // colour; switch to away if it clashes with the user
+                        // team's home (same logic as a real-life referee kit check).
+                        const clubHome = club.homeColor || club.jerseyColor;
+                        const clubAway = club.awayColor || Team.computeAwayColor(clubHome);
+                        const userHome = this.playerTeam.jerseyColor;
+                        const cpuKit   = Team.colorsClash(userHome, clubHome) ? clubAway : clubHome;
+
+                        const cpu = new Team('CPU', userHome, null, {
                             homeNation, budget: club.budget,
                             // Hand Team the persistent league roster so stats
                             // mutations during the match land on the same player
@@ -4369,11 +5072,13 @@
                         // Overwrite the auto-rolled identity with the league club's,
                         // and rebuild the crest from its seed so visuals stay stable.
                         cpu.clubName    = club.clubName;
-                        cpu.jerseyColor = club.jerseyColor;
+                        cpu.homeColor   = clubHome;
+                        cpu.awayColor   = clubAway;
+                        cpu.jerseyColor = cpuKit;          // the kit actually worn this match
                         cpu.crestSeed   = club.crestSeed;
                         if (typeof CrestGenerator !== 'undefined') {
-                            cpu.crestSVG   = CrestGenerator.generateSVG(club.crestSeed, club.jerseyColor, 70);
-                            cpu.crestSVGSm = CrestGenerator.generateSVG(club.crestSeed, club.jerseyColor, 44);
+                            cpu.crestSVG   = CrestGenerator.generateSVG(club.crestSeed, cpuKit, 70);
+                            cpu.crestSVGSm = CrestGenerator.generateSVG(club.crestSeed, cpuKit, 44);
                         }
                         return cpu;
                     }
@@ -4480,6 +5185,9 @@
                         this.generateEvent();
                         this.updateStats();
                         this.updateUI();
+                        // Auto-sub policies — stamina/performance evaluation
+                        // (internally throttled to every ~5 in-game minutes).
+                        this._evaluateAutoSubs();
                     }
                     setTimeout(tickEvent, 500 * mult());
                 };
@@ -4984,7 +5692,7 @@
                 }
 
                 const minute = this.rules.getMatchMinute(this.timeRemaining);
-                this.goals.push({ team, scorer: scorer.name, assister: assist?.name ?? null, time: `${minute}'` });
+                this.goals.push({ team, scorer: scorer.name, assister: assist?.name ?? null, time: `${minute}'`, kind: 'open' });
 
                 const scorerId = team === 'player'
                     ? this.playerTeam.onField.indexOf(scorer)
@@ -5127,9 +5835,11 @@
                 }
                 this._emitMatchEvent('tackle', { team });
 
-                // Stamina drain from tackle (determination softens it)
+                // Tackle costs condition (determination softens it). Drains the
+                // rolling `condition` field — the static `stamina` rating stays.
                 const detMod = (defender.determination || 70) / 100;
-                defender.stamina = Math.max(10, defender.stamina - (3 * (1 - detMod * 0.4)));
+                if (typeof defender.condition !== 'number') defender.condition = 100;
+                defender.condition = Math.max(0, defender.condition - (3 * (1 - detMod * 0.4)));
             }
 
             passEvent(team) {
@@ -5137,10 +5847,12 @@
                 const passer = teamObj.getRandomPlayer(true);
                 const receiver = teamObj.getRandomPlayer(true);
 
-                // Pass quality from vision/creativity/passing
+                // Pass quality from vision/creativity/passing, modulated by
+                // current condition — a tired passer mishits more, even if
+                // their underlying stamina rating is high.
                 const passSkill = ((passer.passing || 70) * 0.45 + (passer.vision || 60) * 0.30 + (passer.creativity || 60) * 0.25) / 100;
-                const staminaFactor = (passer.stamina || 70) / 100;
-                let passAccuracy = passSkill * (staminaFactor * 0.3 + 0.7);
+                const conditionFactor = (passer.condition ?? 100) / 100;
+                let passAccuracy = passSkill * (conditionFactor * 0.3 + 0.7);
 
                 // Passing style — passer's individual setting overrides team via _playerTactic.
                 // short = safer; direct = riskier but enables through-balls.
@@ -5251,6 +5963,7 @@
                     // Track minutes played for both sides of the swap (CPU subs too).
                     this._statSubOff(sub.playerOut);
                     this._statSubOn(sub.playerIn);
+                    this._renderSubsStrip?.();   // instant chip update
                 }
             }
 
@@ -5398,10 +6111,23 @@
 
                 const severity = Math.random();
                 if (severity < 0.6) {
+                    // Light knock — player stays on. Flag with `injuryUntil`
+                    // so the on-pitch injury cross stays visible for ~3 minutes.
+                    injuredPlayer.injuryUntil = minute + 3;
                     this.addEvent(`⚠️ <b class="ev-name">${injuredPlayer.name}</b> receives treatment on the touchline`, 'injury', team);
                     return;
                 }
 
+                // Respect the user's auto-sub policy for the player team. When
+                // 'off', a stretcher-worthy injury still gets the description
+                // but the player keeps playing (the manager will sub them
+                // manually if they want to).
+                const playerAutoSubOff = team === 'player'
+                    && (this.tactics?.autoSubs?.onInjury || 'on') === 'off';
+                if (playerAutoSubOff) {
+                    this.addEvent(`⚠️ <b class="ev-name">${injuredPlayer.name}</b> takes a knock but plays on (auto-sub disabled).`, 'injury', team);
+                    return;
+                }
                 const canSub = teamObj.bench.length > 0 && this.rules.canSubstitute(team);
                 if (canSub) {
                     // Prefer same-type replacement (GK for GK, outfield for outfield)
@@ -5424,6 +6150,7 @@
                     this.rules.recordSub(team);
                     this.substitutions.push({ team, playerOut: injuredPlayer.name, playerIn: replacement.name, time: `${minute}'` });
                     this.dramatic?.play('injury', { name: injuredPlayer.name, minute });
+                    this._renderSubsStrip?.();   // instant chip update
                     this.addEvent(
                         `🚑 <b class="ev-name">${injuredPlayer.name}</b> stretchered off (${minute}')! <b class="ev-name">${replacement.name}</b> comes on`,
                         'injury', team, 'critical'
@@ -5476,7 +6203,7 @@
                 if (r < goalP) {
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 18); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
-                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'`, kind: 'pen' });
                     this.audio?.goalRoar();
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> coolly slots home the penalty!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
@@ -5525,7 +6252,7 @@
                     const minute = this.rules.getMatchMinute(this.timeRemaining);
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 16); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 12); }
-                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'` });
+                    this.goals.push({ team, scorer: taker.name, assister: null, time: `${minute}'`, kind: 'fk' });
                     this.audio?.goalRoar();
                     this.addEvent(`⚽ GOAL — <b class="ev-name">${taker.name}</b> curls a stunning free kick into the top corner!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
@@ -5573,7 +6300,7 @@
                     const minute = this.rules.getMatchMinute(this.timeRemaining);
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 10); }
-                    this.goals.push({ team, scorer: shooter.name, assister: null, time: `${minute}'` });
+                    this.goals.push({ team, scorer: shooter.name, assister: null, time: `${minute}'`, kind: 'long' });
                     this.audio?.goalRoar();
                     this.addEvent(`⚽ SCREAMER! <b class="ev-name">${shooter.name}</b> lets fly from 25 yards — top bins!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
@@ -5684,7 +6411,9 @@
                 const minute = this.rules.getMatchMinute(this.timeRemaining);
                 if (benefits === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 14); }
                 else                       { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 14); }
-                this.goals.push({ team: benefits, scorer: `${culprit.name} (OG)`, assister: null, time: `${minute}'` });
+                // Scorer recorded without the "(OG)" inline marker — the
+                // renderer adds it from `kind: 'og'` for a cleaner chip layout.
+                this.goals.push({ team: benefits, scorer: culprit.name, assister: null, time: `${minute}'`, kind: 'og' });
                 this.audio?.goalRoar();
                 this.addEvent(`😱 OWN GOAL (${minute}')! <b class="ev-name">${culprit.name}</b> turns the ball into his own net!`, 'goal', benefits);
                 this._emitMatchEvent('goal', { team: benefits });
@@ -5719,7 +6448,7 @@
                     const minute = this.rules.getMatchMinute(this.timeRemaining);
                     if (team === 'player') { this.playerScore++; this.momentum = Math.min(100, this.momentum + 22); }
                     else                   { this.cpuScore++;    this.momentum = Math.max(0,   this.momentum - 16); }
-                    this.goals.push({ team, scorer: acrobat.name, assister: null, time: `${minute}'` });
+                    this.goals.push({ team, scorer: acrobat.name, assister: null, time: `${minute}'`, kind: 'spec' });
                     this.audio?.goalRoar();
                     this.addEvent(`🤸 WONDER GOAL — <b class="ev-name">${acrobat.name}</b> with an outrageous ${move}!`, 'goal', team);
                     this._emitMatchEvent('goal', { team });
@@ -5796,21 +6525,71 @@
             updateStats() {
                 this.updatePossession();
 
-                // CM 03/04-style fatigue: determination slows stamina drain, GKs tire at reduced rate
+                // CM 03/04-style fatigue: the static `stamina` rating drives
+                // how fast the rolling `condition` drops; high `determination`
+                // mildly slows that further; GKs barely tire.
+                //
+                //   drain/tick = baseRate × (1 - stam/100 × 0.6) × (1 - det/100 × 0.15)
+                //
+                // Calibrated against a 60-real-second / 90-game-minute match:
+                //   stam 90, det 80 → ~30 condition drop over 90'  (100 → 70)
+                //   stam 70, det 70 → ~40 condition drop over 90'  (100 → 60)
+                //   stam 50, det 60 → ~50 condition drop over 90'  (100 → 50)
+                // So a low-stam player passes the Low threshold (<60) in the
+                // second half, while elite-stam players stay above it.
                 const drainPlayer = (p) => {
-                    const det = (p.determination || 70) / 100;
-                    const baseRate = p.position === 'GK' ? 0.08 : 0.28;
-                    const drain = baseRate * (1 - det * 0.35); // high determination → less drain
-                    p.stamina = Math.max(10, p.stamina - drain);
+                    if (typeof p.condition !== 'number') p.condition = 100;
+                    const stam = (p.stamina || 75) / 100;
+                    const det  = (p.determination || 70) / 100;
+                    const baseRate = p.position === 'GK' ? 0.20 : 0.65;
+                    const drain = baseRate * (1 - stam * 0.6) * (1 - det * 0.15);
+                    p.condition = Math.max(0, p.condition - drain);
                 };
 
                 if (this.playerTeam) this.playerTeam.onField.forEach(drainPlayer);
                 if (this.cpuTeam) this.cpuTeam.onField.forEach(drainPlayer);
 
-                // Live-refresh the per-player stamina bars on the match pitch.
+                // Live-refresh the per-player condition bars on the match pitch.
+                // (The renderer's `updateStamina` API name is historical.)
                 if (this.pitchRenderer) {
-                    this.playerTeam?.onField?.forEach((p, i) => this.pitchRenderer.updateStamina(i,       p.stamina));
-                    this.cpuTeam?.onField?.forEach   ((p, i) => this.pitchRenderer.updateStamina(100 + i, p.stamina));
+                    this.playerTeam?.onField?.forEach((p, i) => this.pitchRenderer.updateStamina(i,       p.condition ?? 100));
+                    this.cpuTeam?.onField?.forEach   ((p, i) => this.pitchRenderer.updateStamina(100 + i, p.condition ?? 100));
+                }
+
+                // CM 03/04-style on-pitch status icons — rating bubble, card,
+                // injury cross. Computed less often than stamina (every 5 ticks
+                // ≈ every 2.5s real-time / ~7.5 in-game minutes at Fast) to
+                // keep the per-tick cost down.
+                this._statusTickCount = (this._statusTickCount || 0) + 1;
+                if (this._statusTickCount % 5 === 0 && this.pitchRenderer) {
+                    const minute = this.rules.getMatchMinute(this.timeRemaining);
+                    const refresh = (p, slotId, conceded) => {
+                        // Rating — only meaningful after a few minutes on the pitch.
+                        // teamWon=undefined (mid-match) so the result modifier
+                        // and clean-sheet bonus don't apply yet — only stats.
+                        // Use live minutes-played (including the current spell)
+                        // so starters get rated, not just subbed-off players.
+                        const liveMins = this._liveMinutesPlayed(p);
+                        let rating = 0;
+                        if (liveMins >= 5) {
+                            const banked = p.stats.minutesPlayed;
+                            p.stats.minutesPlayed = liveMins;
+                            rating = this._computePlayerRating(p, undefined, conceded);
+                            p.stats.minutesPlayed = banked;
+                        }
+                        this.pitchRenderer.updateRating(slotId, rating);
+                        // Card icon — red overrides yellow.
+                        const cardKind = (p.stats?.redCards    || 0) > 0 ? 'red'
+                                       : (p.stats?.yellowCards || 0) > 0 ? 'yellow'
+                                       : null;
+                        this.pitchRenderer.updateCardIcon(slotId, cardKind);
+                        // Injury cross — shown while p.injuryUntil > current minute.
+                        const injured = p.injuryUntil != null && minute < p.injuryUntil;
+                        this.pitchRenderer.updateInjuryIcon(slotId, injured);
+                    };
+                    // Player team's "conceded" = CPU's score so far, and vice versa.
+                    this.playerTeam?.onField?.forEach((p, i) => refresh(p, i,       this.cpuScore));
+                    this.cpuTeam?.onField?.forEach   ((p, i) => refresh(p, 100 + i, this.playerScore));
                 }
 
                 // Momentum drifts slowly back to 50 (regression)
@@ -5839,9 +6618,135 @@
                 document.getElementById('playerPoss').textContent = Math.round(this.stats.playerPossession);
                 document.getElementById('cpuPoss').textContent = Math.round(this.stats.cpuPossession);
 
+                // Top stats strip tiles + scorers + subs tickers
+                this._renderTopStatsStrip();
+                this._renderScorerStrip();
+                this._renderSubsStrip();
+
                 // Keep the Match Management score chip in sync while the match
                 // is running. Cheap no-op when the management screen isn't open.
                 this._renderMatchMgmtScoreChip();
+            }
+
+            // Compact context strip above the score: Competition · Round · Date · Venue.
+            // Pulled from _pendingFixture (set at fast-forward) — empty when
+            // playing a friendly with no fixture context.
+            _renderMatchMeta() {
+                const el = document.getElementById('matchMeta');
+                if (!el) return;
+                const ctx = this._pendingFixture;
+                const parts = [];
+                const comp = (typeof this._currentCompetitionName === 'function')
+                    ? this._currentCompetitionName() : null;
+                if (comp) parts.push(`<span class="mm-comp">${comp}</span>`);
+                if (ctx?.round) parts.push(`<span class="mm-round">Round ${ctx.round}</span>`);
+                if (ctx?.date)  parts.push(`<span class="mm-date">${this._formatDate(ctx.date)}</span>`);
+                if (ctx?.match && ctx?.userClub) {
+                    const userIsHome = ctx.match.home === ctx.userClub.clubName;
+                    const home = ctx.match.home;
+                    parts.push(`<span class="mm-venue">${home} Stadium · ${userIsHome ? 'Home' : 'Away'}</span>`);
+                }
+                el.innerHTML = parts.join('<span class="mm-sep">·</span>');
+            }
+
+            // Top stats strip — pure stat readouts; renders even before any
+            // events fire (zeros).
+            _renderTopStatsStrip() {
+                const s = this.stats || {};
+                const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+                set('mssShotsP',  s.playerShots ?? 0);
+                set('mssShotsC',  s.cpuShots    ?? 0);
+                set('mssSotP',    s.playerShotsOnTarget ?? 0);
+                set('mssSotC',    s.cpuShotsOnTarget    ?? 0);
+                set('mssCornP',   s.playerCorners ?? 0);
+                set('mssCornC',   s.cpuCorners    ?? 0);
+                set('mssFoulsP',  s.playerFouls   ?? 0);
+                set('mssFoulsC',  s.cpuFouls      ?? 0);
+
+                // Cards — count from the cardData log (yellow / red per team).
+                const yc = (team) => (this.cardData?.[team] || []).filter(c => c.type === 'yellow').length;
+                const rc = (team) => (this.cardData?.[team] || []).filter(c => c.type === 'red').length;
+                set('mssYelP', yc('player')); set('mssYelC', yc('cpu'));
+                set('mssRedP', rc('player')); set('mssRedC', rc('cpu'));
+
+                set('mssPossP', Math.round(s.playerPossession ?? 50));
+                set('mssPossC', Math.round(s.cpuPossession    ?? 50));
+            }
+
+            // Scorers ticker (under the score). Livescore-style chip:
+            //
+            //   ⚽ Smith 45' (pen)
+            //      Asst Jones
+            //
+            // Markers per goal `kind`:
+            //   pen  → "(pen)"
+            //   fk   → "(fk)"          (direct free kick)
+            //   og   → "(og)"          (own goal — credited to the opposing team)
+            //   long → "(long)"        (worldie from distance)
+            //   spec → "(spec)"        (acrobatic / bicycle / overhead)
+            // Open-play goals get no marker.
+            _renderScorerStrip() {
+                const KIND_LABEL = {
+                    pen:  '(pen)',
+                    fk:   '(fk)',
+                    og:   '(og)',
+                    long: '(long)',
+                    spec: '(spec)',
+                };
+                const renderSide = (id, team) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    const list = (this.goals || []).filter(g => g.team === team);
+                    if (!list.length) { el.innerHTML = ''; return; }
+                    el.innerHTML = list.map(g => {
+                        const minute = (g.time || '').toString().replace("'", '');
+                        const marker = KIND_LABEL[g.kind] || '';
+                        const markerCls = g.kind === 'pen' ? 'ms-mark-pen'
+                                        : g.kind === 'og'  ? 'ms-mark-og'
+                                        :                    'ms-mark';
+                        const markerHtml = marker ? ` <span class="${markerCls}">${marker}</span>` : '';
+                        const assistHtml = g.assister
+                            ? `<span class="ms-assist-line">↳ Asst <span class="ms-assist-name">${g.assister}</span></span>`
+                            : '';
+                        const tip = `${g.scorer} ${minute}'${marker ? ' ' + marker : ''}${g.assister ? ' · assist ' + g.assister : ''}`;
+                        return `<span class="ms-goal" title="${tip}">`
+                             +     `<span class="ms-goal-line">`
+                             +         `<span class="ms-icon">⚽</span>`
+                             +         `<span class="ms-name">${g.scorer}</span>`
+                             +         `<span class="ms-min">${minute}'</span>`
+                             +         markerHtml
+                             +     `</span>`
+                             +     assistHtml
+                             + `</span>`;
+                    }).join('');
+                };
+                renderSide('playerScorersStrip', 'player');
+                renderSide('cpuScorersStrip',    'cpu');
+            }
+
+            // Substitutions ticker (under the scorers strip). Reads
+            // this.substitutions — each entry has
+            //   { team, playerOut, playerIn, time }
+            // pushed by confirmSubstitution / _executeAutoSub / substitutionEvent
+            // / injuryEvent. Shows the "in / arrow / out / minute" chip per sub.
+            _renderSubsStrip() {
+                const renderSide = (id, team) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    const list = (this.substitutions || []).filter(s => s.team === team);
+                    if (!list.length) { el.innerHTML = ''; return; }
+                    el.innerHTML = list.map(s => {
+                        const minute = (s.time || '').toString().replace("'", '');
+                        return `<span class="msub" title="${s.playerIn} on, ${s.playerOut} off (${minute}')">`
+                             +     `<span class="msub-in">↑ ${s.playerIn}</span>`
+                             +     `<span class="msub-arrow">·</span>`
+                             +     `<span class="msub-out">↓ ${s.playerOut}</span>`
+                             +     `<span class="msub-min">${minute}'</span>`
+                             + `</span>`;
+                    }).join('');
+                };
+                renderSide('playerSubsStrip', 'player');
+                renderSide('cpuSubsStrip',    'cpu');
             }
 
             // Fills the live score chip in the Match Management layout. Reads
@@ -6207,7 +7112,10 @@
                         const sel       = this.selectedPlayerOut?.id === p.id;
                         const avatarSVG = AvatarGenerator.createSVG(p.avatar, 34, this._jerseyFor(p, this.playerTeam.jerseyColor));
                         const ovrColor  = this._overallColor(ovr);
-                        const stamPct = Math.max(0, Math.min(100, Math.round(p.stamina ?? 100)));
+                        // Bar shows rolling match-day condition (0–100), not
+                        // the static stamina rating. Falls back to 100 for any
+                        // fresh-built / un-migrated player.
+                        const stamPct = Math.max(0, Math.min(100, Math.round(p.condition ?? 100)));
                         const stamCol = this._staminaColor(stamPct);
                         const moraleCol = this._moraleColor(p.morale);
                         const moraleGl  = this._moraleGlyph(p.morale);
@@ -6718,8 +7626,16 @@
                 }
 
                 // Sync tactic button active states (within this scope only).
-                scope.querySelectorAll('.tactic-btn').forEach(b => {
+                // .tactic-btn[data-tactic]  → team tactic value
+                // .tactic-btn[data-autosub] → auto-sub policy value
+                scope.querySelectorAll('.tactic-btn[data-tactic]').forEach(b => {
                     b.classList.toggle('active', this.tactics[b.dataset.tactic] === b.dataset.value);
+                });
+                const autoSubs = this.tactics?.autoSubs || {};
+                const autoSubDefaults = { onInjury: 'on', onStamina: 'off', onPerformance: 'off' };
+                scope.querySelectorAll('.tactic-btn[data-autosub]').forEach(b => {
+                    const cur = autoSubs[b.dataset.autosub] ?? autoSubDefaults[b.dataset.autosub] ?? 'off';
+                    b.classList.toggle('active', cur === b.dataset.value);
                 });
 
                 // Render formation pitch (right top)
@@ -6752,7 +7668,8 @@
                 div.dataset.playerId = player.id;
 
                 const avatarSVG = AvatarGenerator.createSVG(player.avatar, 50, this._jerseyFor(player, this.playerTeam?.jerseyColor));
-                const stamPct   = Math.max(0, Math.min(100, Math.round(player.stamina ?? 100)));
+                // Bench bar reads rolling condition — same as pitch slots.
+                const stamPct   = Math.max(0, Math.min(100, Math.round(player.condition ?? 100)));
                 const stamCol   = this._staminaColor(stamPct);
                 const moraleCol = this._moraleColor(player.morale);
                 const moraleGl  = this._moraleGlyph(player.morale);
@@ -6854,6 +7771,7 @@
                     // Track minutes played for both sides of the swap.
                     this._statSubOff(this.selectedPlayerOut);
                     this._statSubOn(this.selectedPlayerIn);
+                    this._renderSubsStrip?.();   // instant chip update
                 }
 
                 this.selectedPlayerOut = null;
@@ -7259,7 +8177,7 @@
                 this.cardData = { player: [], cpu: [] };
                 this.teamInstruction = 'neutral';
                 this._cpuLastFormationChangeMinute = 0;
-                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no' };
+                this.tactics = { mentality: 'normal', closingDown: 'standard', tackling: 'normal', passing: 'mixed', marking: 'zonal', timeWasting: 'mixed', counterAttack: 'no', autoSubs: { onInjury: 'on', onStamina: 'off', onPerformance: 'off' } };
                 if (savedTactics?.tactics) this.tactics = { ...this.tactics, ...savedTactics.tactics };
                 this.momentum = 50;
                 this._attackPhase = null;

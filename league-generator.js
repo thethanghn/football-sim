@@ -64,10 +64,18 @@ class LeagueGenerator {
     }
 
     static _buildClub(city, isUser, colour, suffix, sizeIndex, citiesTotal) {
+        // Compute the away-kit colour at creation time so it persists with the
+        // league snapshot. Falls back to the home colour if Team isn't loaded
+        // (e.g. unit test) — _buildCpuOpponent will lazy-fix on first use.
+        const TeamCls = (typeof Team !== 'undefined') ? Team
+                      : (typeof window !== 'undefined' && window.Team) ? window.Team : null;
+        const awayColor = TeamCls?.computeAwayColor ? TeamCls.computeAwayColor(colour) : colour;
         return {
             cityName:    city.name,
             clubName:    `${city.name} ${suffix}`,
             jerseyColor: colour,
+            homeColor:   colour,
+            awayColor,
             crestSeed:   Math.floor(Math.random() * 99999),
             isUserClub:  !!isUser,
             budget:      this._rollBudget(sizeIndex, citiesTotal),
@@ -304,8 +312,12 @@ class LeagueGenerator {
         // Spread the budget shift across the roster so richer clubs really
         // do field stronger players. Range mirrors what Team uses internally.
         const qualityShift = Math.round(((club.budget || 60) - 60) * 0.25);
-        // Position distribution for a 16-18 player squad: 2 GK + 5 DEF + 6 MID + 5 FWD
-        const positions = ['GK','GK','CB','CB','CB','LB','RB','CDM','CM','CM','CAM','LM','RM','LW','RW','ST','ST','CF'].slice(0, count);
+        // Reuse the same position blueprint as the user team so every CPU
+        // club can field every formation — see Team.POSITION_BLUEPRINT.
+        const BP    = TeamCls.POSITION_BLUEPRINT || [];
+        const DEPTH = TeamCls.POSITION_DEPTH     || ['CB','CM','ST'];
+        const positions = Array.from({ length: count }, (_, i) =>
+            BP[i] || DEPTH[Math.floor(Math.random() * DEPTH.length)]);
 
         club.players = positions.map((pos, idx) => {
             const p = TeamCls.createPlayer(idx, club.jerseyColor, { nation, qualityShift, position: pos });

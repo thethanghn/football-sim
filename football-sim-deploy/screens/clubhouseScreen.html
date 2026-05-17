@@ -129,6 +129,13 @@
                         <div class="ch-view-head">
                             <span>👥</span>
                             <span id="chSquadTitle">Squad</span>
+                            <!-- Attributes / Performance tab switch — sits in
+                                 the same header strip so the table area is the
+                                 full pane below. Wired by _renderClubhouseSquad. -->
+                            <div class="ch-squad-tabs" id="chSquadTabs" role="tablist">
+                                <button class="ch-squad-tab active" data-squad-tab="attributes" role="tab">Attributes</button>
+                                <button class="ch-squad-tab"        data-squad-tab="performance" role="tab">Performance</button>
+                            </div>
                         </div>
                         <div class="ch-squad-stage">
                             <div class="ch-squad-list" id="chSquadList"><!-- player rows --></div>

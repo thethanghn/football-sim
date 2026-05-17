@@ -37,12 +37,31 @@ class ZoneStrength {
         return ZoneStrength.FORMATION_BONUSES[formation] || ZoneStrength.FORMATION_BONUSES['442'];
     }
 
-    // Per-player fatigue multiplier — determination softens the penalty so a
-    // tired but determined player still contributes more than a tired one without it.
+    // Per-player fatigue multiplier — reads the rolling `condition` (0–100,
+    // drained by updateStats / tackles, recovered between matches by the
+    // calendar advance). CM 03/04-style thresholds:
+    //
+    //   ≥ 90  → 1.00 (fresh)
+    //   80–90 → linear 1.00 → 0.92
+    //   70–80 → linear 0.92 → 0.80
+    //   < 70  → linear 0.80 → 0.50 at 0 ("no longer takes an active part")
+    //
+    // Determination softens the penalty below 70 — a tired but mentally tough
+    // player still squeezes out more than a tired one without that grit.
+    // Falls back to `stamina` (legacy) when `condition` isn't present.
     static fatigueMult(player) {
-        const sf  = Math.max(0.5, (player.stamina || 80) / 100);
+        const c = (typeof player.condition === 'number') ? player.condition
+                : (typeof player.stamina   === 'number') ? player.stamina
+                : 100;
         const det = (player.determination || 70) / 100;
-        return sf + (1 - sf) * det * 0.5;
+        let mult;
+        if (c >= 90)      mult = 1.00;
+        else if (c >= 80) mult = 1.00 - (90 - c) * 0.008;        // 1.00 → 0.92
+        else if (c >= 70) mult = 0.92 - (80 - c) * 0.012;        // 0.92 → 0.80
+        else              mult = Math.max(0.50, 0.80 - (70 - c) * 0.00429);
+        // Below 70, determination claws back up to ~5% of the deficit.
+        if (c < 70) mult += (1 - mult) * det * 0.20;
+        return mult;
     }
 
     // PES-style match-day morale multiplier. Applied on top of fatigue.

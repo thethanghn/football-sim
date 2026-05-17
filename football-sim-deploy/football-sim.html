@@ -140,21 +140,153 @@
         /* ═══════════════════════════════════════════════════════
            MATCH SCREEN
         ════════════════════════════════════════════════════════ */
+        /* Match meta strip — competition · round · date · venue. Sits above
+           the crests row so the user knows the context of the match. */
+        .match-meta {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 14px;
+            padding: 6px 12px;
+            font-size: 11px; color: #cbd5e1;
+            text-transform: uppercase; letter-spacing: 0.7px;
+            background: rgba(20, 24, 38, 0.65);
+            border: 1px solid rgba(255,215,0,0.18);
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .match-meta:empty { display: none; }
+        .match-meta .mm-sep { color: #555; }
+        .match-meta .mm-comp { color: #FFD700; font-weight: 800; }
+        .match-meta .mm-round { color: #9ec0ff; font-weight: 700; }
+
         .match-header {
             display: flex;
-            justify-content: space-between;
+            justify-content: center;       /* crests hug the score, not the edges */
             align-items: center;
-            margin-bottom: 18px;
-            padding-bottom: 16px;
+            gap: 28px;
+            margin-bottom: 14px;
+            padding-bottom: 14px;
             border-bottom: 1px solid var(--c-border-subtle);
         }
+
+        /* Compact scorers row sitting under the score-display.
+           Player team's scorers left-aligned, CPU's right-aligned. */
+        .match-scorers {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            width: 100%;
+            margin-top: 4px;
+            min-height: 14px;
+        }
+        .match-scorers-side {
+            display: flex; flex-wrap: wrap;
+            gap: 4px 8px;
+            font-size: 11px;
+            color: #ddd;
+            line-height: 1.3;
+        }
+        .match-scorers-left  { justify-content: flex-end;   text-align: right; }
+        .match-scorers-right { justify-content: flex-start; text-align: left; }
+        /* Livescore-style two-line scorer chip:
+              ⚽ Scorer 45' (pen)
+                 ↳ Asst Jones
+           - line 1: icon · scorer · minute · optional marker
+           - line 2: assister, dim + italic, only when present */
+        .match-scorers .ms-goal {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            background: rgba(255,215,0,0.10);
+            border: 1px solid rgba(255,215,0,0.30);
+            border-radius: 4px;
+            padding: 2px 8px 3px;
+            white-space: nowrap;
+            min-width: 0;
+            line-height: 1.25;
+        }
+        .match-scorers .ms-goal-line {
+            display: inline-flex; align-items: baseline; gap: 5px;
+        }
+        .match-scorers .ms-icon  { font-size: 11px; }
+        .match-scorers .ms-name  { color: #FFD700; font-weight: 700; }
+        .match-scorers .ms-min   { color: #cbd5e1; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+        .match-scorers .ms-mark  { color: #9ec0ff; font-size: 9.5px; font-weight: 600; text-transform: lowercase; }
+        .match-scorers .ms-mark-pen { color: #FCA5A5; font-size: 9.5px; font-weight: 700; text-transform: lowercase; }
+        .match-scorers .ms-mark-og  { color: #FB923C; font-size: 9.5px; font-weight: 700; text-transform: lowercase; }
+        .match-scorers .ms-assist-line {
+            display: block;
+            color: #9aa3b2; font-size: 9.5px; font-style: italic;
+            margin-top: 1px;
+        }
+        .match-scorers .ms-assist-name { color: #cbd5e1; font-style: normal; font-weight: 600; }
+
+        /* Substitutions row — same two-column shape as the scorers strip,
+           one tier subtler (no gold accent, sub-icon prefix). Player team
+           subs on the left, CPU on the right. */
+        .match-subs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            width: 100%;
+            margin-top: 4px;
+            min-height: 14px;
+        }
+        .match-subs-side {
+            display: flex; flex-wrap: wrap;
+            gap: 4px 8px;
+            font-size: 11px;
+            color: #ccc;
+            line-height: 1.3;
+        }
+        .match-subs-left  { justify-content: flex-end;   text-align: right; }
+        .match-subs-right { justify-content: flex-start; text-align: left; }
+        .match-subs .msub {
+            background: rgba(80, 120, 180, 0.18);
+            border: 1px solid rgba(140, 180, 240, 0.30);
+            border-radius: 3px;
+            padding: 1px 6px;
+            white-space: nowrap;
+        }
+        .match-subs .msub-in   { color: #86EFAC; font-weight: 700; }
+        .match-subs .msub-out  { color: #FCA5A5; }
+        .match-subs .msub-arrow{ color: #aaa; margin: 0 3px; }
+        .match-subs .msub-min  { color: #888; font-size: 10px; margin-left: 4px; }
+
+        /* Top stats strip — quick-glance counters. Each tile is small and
+           equally sized; the row scrolls horizontally on narrow viewports. */
+        .match-stats-strip {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+        .mss-tile {
+            background: rgba(15, 19, 30, 0.72);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 4px;
+            padding: 6px 4px 4px;
+            text-align: center;
+        }
+        .mss-val {
+            color: #fff; font-weight: 800; font-size: 14px;
+            font-variant-numeric: tabular-nums;
+            display: inline-flex; gap: 2px; align-items: baseline; justify-content: center;
+        }
+        .mss-sep { color: #555; font-weight: 400; padding: 0 1px; }
+        .mss-lbl {
+            color: #888; font-size: 9px; text-transform: uppercase;
+            letter-spacing: 0.6px; margin-top: 2px;
+        }
+        .mss-card { font-size: 10px; margin-right: 2px; vertical-align: middle; }
 
         .match-team {
             display: flex;
             flex-direction: column;
             align-items: flex-start;
             gap: 4px;
-            flex: 1;
+            flex: 0 0 auto;                /* auto-width — don't push the score around */
         }
 
         .match-team-right {
@@ -2432,75 +2564,190 @@
         /* ── Squad view (clubhouse right pane) ────────────────────────── */
         .ch-view-squad { padding: 18px 24px; flex-direction: column; }
         .ch-squad-stage {
-            position: relative;            /* anchor for the absolute detail */
             flex: 1; min-height: 0;
             margin-top: 12px;
+            display: flex; flex-direction: column;
         }
+        /* When the player detail is open it takes the whole squad pane —
+           the list (and the Attributes/Performance tab switch in the head)
+           hide so the detail isn't nested inside the grid. */
+        .ch-view-squad.is-detail .ch-squad-list { display: none; }
+        .ch-view-squad.is-detail .ch-squad-tabs { display: none; }
+        /* Squad-view tab switch (Attributes / Performance) — sits inside
+           the ch-view-head, right-aligned. */
+        .ch-squad-tabs {
+            margin-left: auto;
+            display: inline-flex;
+            gap: 2px;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(255,215,0,0.20);
+            border-radius: 5px;
+            padding: 2px;
+        }
+        .ch-squad-tab {
+            background: transparent;
+            border: none;
+            color: #aaa;
+            padding: 5px 12px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            cursor: pointer;
+            border-radius: 3px;
+            font-family: inherit;
+        }
+        .ch-squad-tab:hover { color: #eee; }
+        .ch-squad-tab.active {
+            background: rgba(255,215,0,0.18);
+            color: #FFD700;
+        }
+
+        /* Performance-tab grid — 19 columns. Override the Attributes-tab
+           template via a parent .squad-tab-performance class. */
+        .ch-squad-list.squad-tab-performance .ch-squad-row,
+        .ch-squad-list.squad-tab-performance .ch-squad-head {
+            grid-template-columns:
+                28px 160px 60px 30px           /* # · Name · Pos · Age */
+                34px 44px                       /* App · Min */
+                30px 30px                       /* Gls · Ast */
+                30px 30px                       /* Sht · SoT */
+                30px 30px                       /* Tck · Fls */
+                26px 26px                       /* Y · R */
+                40px 40px                       /* Sht/M · Tck/M */
+                42px                            /* Pass% */
+                40px                            /* Avg */
+                86px;                           /* Form */
+        }
+        .ch-squad-list.squad-tab-performance .csc-count,
+        .ch-squad-list.squad-tab-performance .csc-avg {
+            color: #ddd;
+            text-align: center;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+        .ch-squad-list.squad-tab-performance .csc-avg { color: #9ec0ff; }
+        .card-y-tone { color: #FACC15; }
+        .card-r-tone { color: #EF4444; font-weight: 800; }
+
+        /* CM 03/04-style squad attribute grid. The whole list scrolls
+           horizontally when the viewport can't fit all 26 columns. Header +
+           rows share the same grid-template-columns so cells align. */
         .ch-squad-list {
             background: #0e0e0e;
             border: 1px solid #333;
             border-radius: 6px;
-            overflow-y: auto;
-            padding: 4px;
+            overflow: auto;                  /* horizontal + vertical scroll */
+            padding: 0;
             height: 100%;
         }
-        .ch-squad-row {
+        .ch-squad-row, .ch-squad-head {
             display: grid;
-            grid-template-columns: 28px 44px 1fr 64px 36px;
-            gap: 10px;
+            grid-template-columns:
+                28px 160px 60px 30px           /* # · Name · Pos · Age */
+                36px                            /* OVR */
+                26px 26px 26px                  /* Phy: Pac Stm Str */
+                26px 26px 26px 26px 26px        /* Tec: Fin Pas Drb Crs Hed */
+                26px 26px 26px                  /* Def: Tck Mrk Pos */
+                26px 26px 26px 26px 26px 26px   /* Men: Vis Cre OtB Cmp Det Ant */
+                26px 26px                       /* GK:  Ref Hnd */
+                32px 32px                       /* Fit: Cnd NF */
+                86px;                           /* Form — last 5 ratings, e.g. "6-7-6-8-9" */
             align-items: center;
-            padding: 6px 10px;
-            border-radius: 4px;
-            cursor: pointer;
+            gap: 0;
+            padding: 5px 8px;
+            font-size: 11px;
             color: #ddd;
-            font-size: 13px;
-            border: 1px solid transparent;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            min-width: max-content;
         }
+        .ch-squad-row { cursor: pointer; }
         .ch-squad-row:hover { background: rgba(255,255,255,0.04); }
         .ch-squad-row.selected {
             background: rgba(255,215,0,0.10);
-            border-color: rgba(255,215,0,0.45);
+            outline: 1px solid rgba(255,215,0,0.45);
+            outline-offset: -1px;
         }
-        .ch-squad-row .csr-num    { color: #888; font-weight: 700; text-align: right; }
-        .ch-squad-row .csr-avatar {
-            width: 44px; height: 44px;
-            border-radius: 50%; overflow: hidden;
-            background: linear-gradient(180deg, #2c2c34 0%, #16161c 100%);
-            border: 1px solid #333;
+        /* Sticky header — stays visible while scrolling rows */
+        .ch-squad-head {
+            position: sticky; top: 0; z-index: 2;
+            background: linear-gradient(180deg, #181818 0%, #0e0e0e 100%);
+            color: #FFD700;
+            font-size: 10px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255,215,0,0.30);
+            cursor: default;
         }
-        .ch-squad-row .csr-avatar svg { width: 100%; height: 100%; display: block; }
-        .ch-squad-row .csr-name   { color: #eee; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .ch-squad-row .csr-flag   { font-size: 10px; color: #888; font-weight: 400; margin-left: 4px; }
-        .ch-squad-row .csr-pos    { color: #aaa; font-size: 11px; text-align: center; }
-        .ch-squad-row .csr-ovr    {
-            text-align: center; font-weight: 800; font-size: 13px;
-            border-radius: 4px; padding: 2px 0;
+        .ch-squad-head span {
+            text-align: center;
+            padding: 2px 0;
         }
+        .csh-name { text-align: left !important; padding-left: 4px !important; }
+        /* Group separators — subtle vertical line between attribute groups */
+        .csh-pace, .csh-finishing, .csh-tackling, .csh-vision, .csh-reflexes, .csh-condition, .csh-form,
+        .ch-squad-row > .csc-att:nth-child(6),  /* before Pac (idx 6) */
+        .ch-squad-row > .csc-att:nth-child(9),  /* before Fin */
+        .ch-squad-row > .csc-att:nth-child(14), /* before Tck */
+        .ch-squad-row > .csc-att:nth-child(17), /* before Vis */
+        .ch-squad-row > .csc-att:nth-child(23), /* before Ref */
+        .ch-squad-row > .csc-att:nth-child(25)  /* before Cnd */
+        { border-left: 1px solid rgba(255,255,255,0.06); }
+
+        /* Identity columns */
+        .ch-squad-row .csc-num  { color: #888; font-weight: 700; text-align: center; }
+        .ch-squad-row .csc-name { color: #eee; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 4px; }
+        .ch-squad-row .csc-flag { margin-right: 4px; }
+        .ch-squad-row .csc-pos  { color: #aaa; font-size: 10px; text-align: center; }
+        .ch-squad-row .csc-age  { color: #aaa; text-align: center; }
+
+        /* Attribute cells — colour-tiered by value */
+        .ch-squad-row .csc-att {
+            text-align: center;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            font-size: 11px;
+        }
+        .ch-squad-row .csc-ovr { font-size: 12px; }
+        .ch-squad-row .csc-form {
+            font-size: 10.5px;
+            letter-spacing: 0.4px;
+            font-feature-settings: "tnum";
+        }
+        .att-elite { color: #C084FC; }       /* purple — ≥85 */
+        .att-good  { color: #16A34A; }       /* green  — ≥75 */
+        .att-ok    { color: #E0E0E0; }       /* white  — ≥65 */
+        .att-low   { color: #FACC15; }       /* yellow — ≥55 */
+        .att-poor  { color: #EF4444; }       /* red    — <55 */
+        .att-na    { color: #555; }
+        .csc-dim   { opacity: 0.28; }        /* GK attrs on outfielders */
+
         .ch-squad-section-head {
+            position: sticky; left: 0;
+            grid-column: 1 / -1;             /* hint — not honoured outside the grid row */
             color: #FFD700; font-size: 10px; text-transform: uppercase;
             letter-spacing: 0.7px; font-weight: 700;
-            padding: 10px 12px 4px;
+            padding: 10px 10px 4px;
+            background: #121212;
             border-top: 1px solid rgba(255,255,255,0.05);
         }
         .ch-squad-section-head:first-child { border-top: none; }
 
-        /* Detail overlay — covers the squad list inside the right pane. */
+        /* Player detail panel — takes the place of the squad list within the
+           squad pane (no longer floats over it). Hidden by default; shown
+           when .active. Top-right nav (Prev / counter / Next / Close) lets the
+           user step through players or pop back to the list. */
         .ch-squad-detail {
-            position: absolute; inset: 0;
+            display: none;
+            position: relative;
+            flex: 1; min-height: 0;
             background: #0e0e0e;
             border: 1px solid rgba(255,215,0,0.4);
             border-radius: 6px;
             padding: 22px 22px 18px;
             overflow-y: auto;
-            box-shadow: 0 -2px 18px rgba(0,0,0,0.55);
-            transform: translateY(8px);
-            opacity: 0; pointer-events: none;
-            transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.55);
         }
-        .ch-squad-detail.active {
-            transform: translateY(0);
-            opacity: 1; pointer-events: auto;
-        }
+        .ch-squad-detail.active { display: block; }
         /* Top-right nav bar inside the detail overlay: Prev · counter · Next · Close. */
         .ch-squad-nav {
             position: absolute; top: 8px; right: 10px;
@@ -2636,7 +2883,7 @@
          the [data-screen] placeholders below. football-sim.js's bootstrap
          waits for the 'screensReady' event before calling getElementById on
          injected nodes. -->
-    <script src="screens/screen-loader.js?v=21"></script>
+    <script src="screens/screen-loader.js?v=23"></script>
 </head>
 <body>
     <!-- Top floating menu bar (always visible) -->
@@ -3023,26 +3270,26 @@
     <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
     <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
 
-    <script src="audio.js?v=21"></script>
-    <script src="dramatic.js?v=21"></script>
+    <script src="audio.js?v=23"></script>
+    <script src="dramatic.js?v=23"></script>
     <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
-    <script src="dramatic-scenes/_helpers.js?v=21"></script>
-    <script src="dramatic-scenes/goal.js?v=21"></script>
-    <script src="dramatic-scenes/freekick.js?v=21"></script>
-    <script src="dramatic-scenes/kickoff.js?v=21"></script>
-    <script src="dramatic-scenes/corner.js?v=21"></script>
-    <script src="dramatic-scenes/redCard.js?v=21"></script>
-    <script src="dramatic-scenes/disallowed.js?v=21"></script>
-    <script src="dramatic-scenes/penalty.js?v=21"></script>
-    <script src="dramatic-scenes/injury.js?v=21"></script>
-    <script src="random.js?v=21"></script>
-    <script src="storage.js?v=21"></script>
-    <script src="screens/onboarding-data.js?v=21"></script>
-    <script src="league-generator.js?v=21"></script>
-    <script src="mgmt-components.js?v=21"></script>
-    <script src="game-flow.js?v=21"></script>
-    <script src="zone-strength.js?v=21"></script>
-    <script src="football-sim.js?v=21"></script>
-    <script src="phaser-badge.js?v=21"></script>
+    <script src="dramatic-scenes/_helpers.js?v=23"></script>
+    <script src="dramatic-scenes/goal.js?v=23"></script>
+    <script src="dramatic-scenes/freekick.js?v=23"></script>
+    <script src="dramatic-scenes/kickoff.js?v=23"></script>
+    <script src="dramatic-scenes/corner.js?v=23"></script>
+    <script src="dramatic-scenes/redCard.js?v=23"></script>
+    <script src="dramatic-scenes/disallowed.js?v=23"></script>
+    <script src="dramatic-scenes/penalty.js?v=23"></script>
+    <script src="dramatic-scenes/injury.js?v=23"></script>
+    <script src="random.js?v=23"></script>
+    <script src="storage.js?v=23"></script>
+    <script src="screens/onboarding-data.js?v=23"></script>
+    <script src="league-generator.js?v=23"></script>
+    <script src="mgmt-components.js?v=23"></script>
+    <script src="game-flow.js?v=23"></script>
+    <script src="zone-strength.js?v=23"></script>
+    <script src="football-sim.js?v=23"></script>
+    <script src="phaser-badge.js?v=23"></script>
 </body>
 </html>

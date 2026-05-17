@@ -23,7 +23,11 @@
     ];
 
     async function loadOne(name) {
-        const res = await fetch(`screens/${name}.html`);
+        // `cache: 'no-store'` so the browser (and any CDN in front of it)
+        // doesn't serve a stale partial when the screen markup changes.
+        // The main page's <script src="...?v=NN"> already busts JS/CSS, but
+        // these `fetch()` calls live outside that mechanism.
+        const res = await fetch(`screens/${name}.html`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status} for screens/${name}.html`);
         const markup = (await res.text()).trim();
         const placeholder = document.querySelector(`[data-screen="${name}"]`);

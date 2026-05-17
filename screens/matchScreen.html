@@ -1,11 +1,41 @@
         <div class="screen" id="matchScreen">
+            <!-- Match meta strip (above the score) — competition · round · date · venue.
+                 Populated from the saved fixture data by FootballSimulator._renderMatchMeta. -->
+            <div class="match-meta" id="matchMeta"></div>
+
             <div class="match-header">
                 <div class="match-team" id="playerTeamDisplay"></div>
                 <div class="match-center">
                     <div class="timer" id="timer">1:00</div>
                     <div class="score-display"><span id="playerScore">0</span> - <span id="cpuScore">0</span></div>
+                    <!-- Compact scorers row sits under the score. Player team
+                         scorers on the left, CPU on the right — populated as
+                         each goal fires (see _renderScorerStrip). -->
+                    <div class="match-scorers">
+                        <div class="match-scorers-side match-scorers-left"  id="playerScorersStrip"></div>
+                        <div class="match-scorers-side match-scorers-right" id="cpuScorersStrip"></div>
+                    </div>
+                    <!-- Substitutions row, same two-column layout — populated
+                         from this.substitutions by _renderSubsStrip. -->
+                    <div class="match-subs">
+                        <div class="match-subs-side match-subs-left"  id="playerSubsStrip"></div>
+                        <div class="match-subs-side match-subs-right" id="cpuSubsStrip"></div>
+                    </div>
                 </div>
                 <div class="match-team match-team-right" id="cpuTeamDisplay"></div>
+            </div>
+
+            <!-- Top stats strip — quick counters that mirror the sidebar
+                 detail but are visible at a glance. Each tile shows
+                 PlayerValue – CPUValue, with a tiny label below. -->
+            <div class="match-stats-strip" id="matchStatsStrip">
+                <div class="mss-tile"><div class="mss-val"><span id="mssShotsP">0</span><span class="mss-sep">–</span><span id="mssShotsC">0</span></div><div class="mss-lbl">Shots</div></div>
+                <div class="mss-tile"><div class="mss-val"><span id="mssSotP">0</span><span class="mss-sep">–</span><span id="mssSotC">0</span></div><div class="mss-lbl">On target</div></div>
+                <div class="mss-tile"><div class="mss-val"><span id="mssCornP">0</span><span class="mss-sep">–</span><span id="mssCornC">0</span></div><div class="mss-lbl">Corners</div></div>
+                <div class="mss-tile"><div class="mss-val"><span id="mssFoulsP">0</span><span class="mss-sep">–</span><span id="mssFoulsC">0</span></div><div class="mss-lbl">Fouls</div></div>
+                <div class="mss-tile"><div class="mss-val"><span class="mss-card mss-card-y">🟨</span><span id="mssYelP">0</span><span class="mss-sep">|</span><span id="mssYelC">0</span></div><div class="mss-lbl">Yellow</div></div>
+                <div class="mss-tile"><div class="mss-val"><span class="mss-card mss-card-r">🟥</span><span id="mssRedP">0</span><span class="mss-sep">|</span><span id="mssRedC">0</span></div><div class="mss-lbl">Red</div></div>
+                <div class="mss-tile"><div class="mss-val"><span id="mssPossP">50</span><span class="mss-sep">%–</span><span id="mssPossC">50</span><span class="mss-sep">%</span></div><div class="mss-lbl">Possession</div></div>
             </div>
 
             <div class="match-content">

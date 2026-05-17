@@ -50,13 +50,31 @@
                 </aside>
 
                 <main class="clubhouse-stage">
-                    <!-- Default stadium view -->
+                    <!-- Default stadium view — illustration + banner + three
+                         info cards (Kits, City, Stadium). The cards' inner
+                         HTML is filled by _renderStadiumExtras. -->
                     <div class="ch-view ch-view-stadium active" data-view="stadium">
-                        <div class="ch-stadium" id="chStadium"></div>
-                        <div class="ch-banner">
-                            <div class="ch-banner-tag">Home of</div>
-                            <div class="ch-banner-name" id="chBannerName">Your Club</div>
-                            <div class="ch-banner-sub"  id="chBannerSub">— · —</div>
+                        <div class="ch-stadium-row">
+                            <div class="ch-stadium" id="chStadium"></div>
+                            <div class="ch-banner">
+                                <div class="ch-banner-tag">Home of</div>
+                                <div class="ch-banner-name" id="chBannerName">Your Club</div>
+                                <div class="ch-banner-sub"  id="chBannerSub">— · —</div>
+                            </div>
+                        </div>
+                        <div class="ch-stad-info">
+                            <div class="ch-stad-card" id="chKitsCard">
+                                <div class="ch-stad-card-head">Kits</div>
+                                <div class="ch-stad-card-body" id="chKitsBody"></div>
+                            </div>
+                            <div class="ch-stad-card" id="chCityCard">
+                                <div class="ch-stad-card-head">City</div>
+                                <div class="ch-stad-card-body" id="chCityBody"></div>
+                            </div>
+                            <div class="ch-stad-card" id="chStadCard">
+                                <div class="ch-stad-card-head">Stadium</div>
+                                <div class="ch-stad-card-body" id="chStadBody"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -129,6 +147,13 @@
                         <div class="ch-view-head">
                             <span>👥</span>
                             <span id="chSquadTitle">Squad</span>
+                            <!-- Attributes / Performance tab switch — sits in
+                                 the same header strip so the table area is the
+                                 full pane below. Wired by _renderClubhouseSquad. -->
+                            <div class="ch-squad-tabs" id="chSquadTabs" role="tablist">
+                                <button class="ch-squad-tab active" data-squad-tab="attributes" role="tab">Attributes</button>
+                                <button class="ch-squad-tab"        data-squad-tab="performance" role="tab">Performance</button>
+                            </div>
                         </div>
                         <div class="ch-squad-stage">
                             <div class="ch-squad-list" id="chSquadList"><!-- player rows --></div>

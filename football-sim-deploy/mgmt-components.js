@@ -193,6 +193,43 @@ window.MgmtComponents = {
         </div>`;
     },
 
+    // Auto-substitution policies (Tactic view only). Three rows for Injury /
+    // Stamina / Performance. Buttons reuse the .tactic-btn style but carry
+    // a data-autosub attribute so the delegated handler in football-sim.js
+    // routes them to _setAutoSub instead of setTactic.
+    buildAutoSubPanel() {
+        return `
+        <div class="mgmt-section instruction-panel auto-sub-panel" data-section="auto-sub-panel" style="flex-shrink: 0;">
+            <div class="instruction-title">🤖 Auto Substitutions</div>
+
+            <div class="tactic-row">
+                <span class="tactic-label">On Injury</span>
+                <div class="tactic-options">
+                    <button class="tactic-btn"        data-autosub="onInjury" data-value="off">Off</button>
+                    <button class="tactic-btn active" data-autosub="onInjury" data-value="on">On</button>
+                </div>
+            </div>
+
+            <div class="tactic-row">
+                <span class="tactic-label">On Stamina</span>
+                <div class="tactic-options">
+                    <button class="tactic-btn active" data-autosub="onStamina" data-value="off">Off</button>
+                    <button class="tactic-btn"        data-autosub="onStamina" data-value="low">Cond&lt;60</button>
+                    <button class="tactic-btn"        data-autosub="onStamina" data-value="critical">Cond&lt;40</button>
+                </div>
+            </div>
+
+            <div class="tactic-row">
+                <span class="tactic-label">On Performance</span>
+                <div class="tactic-options">
+                    <button class="tactic-btn active" data-autosub="onPerformance" data-value="off">Off</button>
+                    <button class="tactic-btn"        data-autosub="onPerformance" data-value="low">Rating&lt;6.0</button>
+                    <button class="tactic-btn"        data-autosub="onPerformance" data-value="critical">Rating&lt;5.0</button>
+                </div>
+            </div>
+        </div>`;
+    },
+
     // Tactic preset slots (Tactic view only). Filled later by Phase 3 work;
     // mounted now so the slot exists.
     buildPresetSlots() {
@@ -257,6 +294,7 @@ window.MgmtComponents = {
                     <div class="mgmt-settings-pane" style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; padding-right: 4px;">
                         ${this.buildFormationSelector()}
                         ${this.buildTacticPanel()}
+                        ${this.buildAutoSubPanel()}
                         ${this.buildPresetSlots()}
                     </div>
                 </div>

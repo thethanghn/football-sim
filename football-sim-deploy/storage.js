@@ -95,7 +95,22 @@ class GameStorage {
     }
 
     // ─── League (10-club table generated at onboarding) ─────────────────
-    static loadLeague() { return this._read(this.KEYS.league); }
+    // Load runs Team._migratePlayer over every CPU roster so older saves get
+    // the new fitness fields (condition / naturalFitness) back-filled the
+    // first time they're read.
+    static loadLeague() {
+        const league = this._read(this.KEYS.league);
+        // Migrate legacy player rosters lazily. Team is a global class (loaded
+        // after storage.js); guard so this helper still works if loaded standalone.
+        const T = (typeof Team !== 'undefined') ? Team
+                : (typeof window !== 'undefined' && window.Team) ? window.Team : null;
+        if (Array.isArray(league) && T?._migratePlayer) {
+            league.forEach(c => {
+                if (Array.isArray(c.players)) c.players = c.players.map(T._migratePlayer);
+            });
+        }
+        return league;
+    }
     static saveLeague(clubs) { return this._write(this.KEYS.league, clubs); }
 
     // ─── Fixtures (round-robin schedule for the league) ─────────────────
