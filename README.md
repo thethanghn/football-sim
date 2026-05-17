@@ -21,6 +21,79 @@ football-sim/
 
 ---
 
+## Site map — screens · panels · views
+
+The whole app lives in `football-sim.html`. Five top-level **screens** are loaded as partials from `screens/<name>.html` into `[data-screen]` placeholders at boot; only one carries `.active` at a time. The Clubhouse hosts its own **sub-views** inside its right pane, and the Match-Management editor is a reusable **panel** composed from `mgmt-components.js` and mounted into two different hosts.
+
+```
+App
+├── Always-on chrome
+│   ├── #topMenuBar ─────── brand · manager+club · in-game date · ☰
+│   │   └── #topMenuDropdown  ⏸ Pause · 🔊 Sound · ⚡ Speed · 🐛 Debug · 📜 History · 🔄 Reset
+│   ├── #onboardingOverlay ─ 4-step wizard (name → nation → city → league preview)
+│   ├── #ffOverlay ──────── fast-forward gold progress bar before a match
+│   ├── #playerContextMenu  🔄 Substitute · 📋 Details · ⚙ Instructions · 🎯 Arrow
+│   ├── #playerInstructionsMenu ─ per-player instruction popover
+│   ├── #playerArrowMenu ── 3×3 compass arrow picker
+│   └── #historyModal ───── last-50-match list + per-match detail
+│
+├── Screens (one .active at a time)
+│   │
+│   ├── #clubhouseScreen ─── post-onboarding home base
+│   │   ├── Desktop:  .clubhouse-menu (left rail)
+│   │   │             ├── Menu items: Stadium · Squad · Tactics & XI · League · Fixtures · Play · History · Office
+│   │   │             └── Back / label / Forward nav pill
+│   │   ├── Mobile:   .ch-mobile-footer (bottom bar — see §15.1)
+│   │   │             ├── ☰ Menu  →  .ch-mobile-menu-sheet (slide-up sheet of items)
+│   │   │             └── Back / label / Forward nav pill (mirrors desktop via _refreshNavButtons)
+│   │   └── .clubhouse-stage (right pane — one .ch-view.active)
+│   │       ├── .ch-view-stadium        ─ kit-colour stadium SVG + "Home of <Club>" banner
+│   │       ├── .ch-view-table (league) ─ standings + 🥇 Top Scorers + 🎯 Top Assists  (§13.1)
+│   │       ├── .ch-view-table (fixtures) ─ rounds grouped past / today / upcoming
+│   │       ├── .ch-view-tactic         ─ .tactic-host  →  mgmt-components Tactic layout (§7)
+│   │       │                            (squad-depth · next-match chip · pitch · tactic panel · presets)
+│   │       ├── .ch-view-next-match     ─ matchup card + meta + ▶ Play (triggers #ffOverlay)
+│   │       ├── .ch-view-table (today)  ─ post-match round results
+│   │       └── .ch-view-squad          ─ portrait list + .ch-squad-detail slide-in
+│   │
+│   ├── #managementScreen ── independent Match-Management editor (kickoff + mid-match)
+│   │   ├── Header (#managementCrest + #managementTitle)
+│   │   └── .match-mgmt-host  →  mgmt-components Match-Mgmt layout (§7)
+│   │       ├── .mm-score-chip       ─ live  <Club> N – N <Opp> · 73' · Subs 3/5
+│   │       └── Main grid (1fr 2fr)
+│   │           ├── .squad-section (bench list)
+│   │           └── .mgmt-right-stack (2fr 1fr)
+│   │               ├── .squad-section (formation pitch + .player-detail-overlay)
+│   │               └── .mgmt-settings-pane
+│   │                   ├── .pending-subs-panel    (slot, currently empty)
+│   │                   ├── .formation-selector    (7 formation buttons)
+│   │                   ├── .tactic-panel          (Mentality / Pressing / …)
+│   │                   └── .primary-action-host   (▶ Kick Off / ← Resume Match)
+│   │
+│   ├── #matchScreen ─────── live 90' simulation
+│   │   ├── .match-header (crests · timer · score)
+│   │   ├── .pitch-container
+│   │   │   ├── #pitchSVG          ─ Phaser/SVG PitchRenderer (§8)
+│   │   │   ├── #dramaticOverlay   ─ cinematic SVG scenes (goal · penalty · red card · …)
+│   │   │   └── #celebrationScreen ─ confetti + stadium scene on a goal
+│   │   ├── .match-content / #eventsLog (stats panel + commentary)
+│   │   └── #manageBtn  →  switches to #managementScreen (in-match mode)
+│   │
+│   ├── #resultScreen ────── post-match summary
+│   │   ├── Final score + #goalScorerList
+│   │   ├── #finalStats (per-team box-score)
+│   │   ├── .player-stats-table (per-player ratings, both sides)
+│   │   └── ← Back to Clubhouse  (calls _enterClubhouse)
+│   │
+│   └── #formationScreen ── legacy, unreachable in the current flow
+│
+└── (Match flow: Next Match → #ffOverlay → #managementScreen [kickoff] → #matchScreen → #resultScreen → Clubhouse)
+```
+
+`mgmt-components.js` exports the same `.mgmt-panel` builders to two hosts — `.match-mgmt-host` (Match-Mgmt layout, primary action visible) and `.tactic-host` (Tactic layout, no primary action). `_getActiveMgmtScope()` returns whichever panel is currently visible so renderers operate on the right DOM tree.
+
+---
+
 ## 1. Match Engine
 
 A text-driven engine that ticks every event interval and resolves football events via a four-phase possession FSM.
