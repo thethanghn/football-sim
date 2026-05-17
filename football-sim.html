@@ -2143,19 +2143,36 @@
             transform: translateY(0);
             opacity: 1; pointer-events: auto;
         }
-        .ch-squad-close {
+        /* Top-right nav bar inside the detail overlay: Prev · counter · Next · Close. */
+        .ch-squad-nav {
             position: absolute; top: 8px; right: 10px;
+            display: flex; align-items: center; gap: 4px;
+            font-family: Arial, sans-serif;
+            z-index: 2;
+        }
+        .ch-squad-navbtn, .ch-squad-close {
             background: transparent; border: none;
-            color: #ccc; font-size: 26px; line-height: 1;
-            cursor: pointer; padding: 2px 6px;
-            border-radius: 4px;
+            color: #ccc; line-height: 1; cursor: pointer;
+            border-radius: 4px; padding: 2px 8px;
             font-family: Arial, sans-serif;
         }
-        .ch-squad-close:hover { color: #FFD700; background: rgba(255,215,0,0.10); }
-        .ch-squad-detail-inner { padding-right: 28px; }   /* leave room for the × button */
+        .ch-squad-navbtn { font-size: 22px; }
+        .ch-squad-close  { font-size: 26px; padding: 2px 6px; margin-left: 4px; }
+        .ch-squad-navbtn:hover:not(:disabled),
+        .ch-squad-close:hover  { color: #FFD700; background: rgba(255,215,0,0.10); }
+        .ch-squad-navbtn:disabled { color: #555; cursor: default; }
+        .ch-squad-navlabel {
+            color: #888; font-size: 11px; min-width: 44px; text-align: center;
+            letter-spacing: 0.4px;
+        }
+        /* Inner content runs edge-to-edge — the nav bar floats above it via
+           position: absolute. Only the header needs to dodge the nav bar so
+           the player name + meta don't slide underneath (see .ch-detail-head). */
+        .ch-squad-detail-inner { padding-right: 0; }
         .ch-detail-head {
             display: flex; gap: 14px; align-items: flex-start;
             padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.07);
+            padding-right: 116px;     /* leave the top-right corner for the nav bar */
         }
         .ch-detail-avatar {
             width: 84px; height: 84px; flex-shrink: 0;
@@ -2263,7 +2280,7 @@
          the [data-screen] placeholders below. football-sim.js's bootstrap
          waits for the 'screensReady' event before calling getElementById on
          injected nodes. -->
-    <script src="screens/screen-loader.js"></script>
+    <script src="screens/screen-loader.js?v=14"></script>
 </head>
 <body>
     <!-- Top floating menu bar (always visible) -->
@@ -2635,25 +2652,25 @@
     <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
     <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
 
-    <script src="audio.js"></script>
-    <script src="dramatic.js"></script>
+    <script src="audio.js?v=14"></script>
+    <script src="dramatic.js?v=14"></script>
     <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
-    <script src="dramatic-scenes/_helpers.js"></script>
-    <script src="dramatic-scenes/goal.js"></script>
-    <script src="dramatic-scenes/freekick.js"></script>
-    <script src="dramatic-scenes/kickoff.js"></script>
-    <script src="dramatic-scenes/corner.js"></script>
-    <script src="dramatic-scenes/redCard.js"></script>
-    <script src="dramatic-scenes/disallowed.js"></script>
-    <script src="dramatic-scenes/penalty.js"></script>
-    <script src="dramatic-scenes/injury.js"></script>
-    <script src="random.js"></script>
-    <script src="storage.js"></script>
-    <script src="screens/onboarding-data.js"></script>
-    <script src="league-generator.js"></script>
-    <script src="game-flow.js"></script>
-    <script src="zone-strength.js"></script>
-    <script src="football-sim.js"></script>
-    <script src="phaser-badge.js"></script>
+    <script src="dramatic-scenes/_helpers.js?v=14"></script>
+    <script src="dramatic-scenes/goal.js?v=14"></script>
+    <script src="dramatic-scenes/freekick.js?v=14"></script>
+    <script src="dramatic-scenes/kickoff.js?v=14"></script>
+    <script src="dramatic-scenes/corner.js?v=14"></script>
+    <script src="dramatic-scenes/redCard.js?v=14"></script>
+    <script src="dramatic-scenes/disallowed.js?v=14"></script>
+    <script src="dramatic-scenes/penalty.js?v=14"></script>
+    <script src="dramatic-scenes/injury.js?v=14"></script>
+    <script src="random.js?v=14"></script>
+    <script src="storage.js?v=14"></script>
+    <script src="screens/onboarding-data.js?v=14"></script>
+    <script src="league-generator.js?v=14"></script>
+    <script src="game-flow.js?v=14"></script>
+    <script src="zone-strength.js?v=14"></script>
+    <script src="football-sim.js?v=14"></script>
+    <script src="phaser-badge.js?v=14"></script>
 </body>
 </html>

@@ -92,8 +92,15 @@
                         <div class="ch-squad-stage">
                             <div class="ch-squad-list" id="chSquadList"><!-- player rows --></div>
                             <div class="ch-squad-detail" id="chSquadDetail" aria-hidden="true">
-                                <button class="ch-squad-close" id="chSquadCloseBtn"
-                                        aria-label="Close details" title="Close">×</button>
+                                <div class="ch-squad-nav">
+                                    <button class="ch-squad-navbtn" id="chSquadPrevBtn"
+                                            aria-label="Previous player" title="Previous (←)">‹</button>
+                                    <span class="ch-squad-navlabel" id="chSquadNavLabel">— / —</span>
+                                    <button class="ch-squad-navbtn" id="chSquadNextBtn"
+                                            aria-label="Next player" title="Next (→)">›</button>
+                                    <button class="ch-squad-close" id="chSquadCloseBtn"
+                                            aria-label="Close details" title="Close">×</button>
+                                </div>
                                 <div class="ch-squad-detail-inner" id="chSquadDetailInner"></div>
                             </div>
                         </div>

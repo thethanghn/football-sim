@@ -11,6 +11,9 @@
 window.SEA_NATIONS = [
     {
         code: 'VN', name: 'Vietnam', flag: '🇻🇳',
+        format: 'last_first',
+        first: ['Minh','Quang','Hùng','Tuấn','Dũng','Nam','Đức','Long','Hải','Anh','Phong','Bảo','Kiên','Thành','Trọng','Tiến','Công','Vũ','Thắng','Khánh'],
+        last:  ['Nguyễn','Trần','Lê','Phạm','Hoàng','Phan','Vũ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương','Lý','Đinh'],
         outline: '50,4 60,8 56,18 62,28 58,40 65,52 62,64 56,76 50,90 44,84 40,72 36,60 34,46 36,32 40,20 44,10',
         cities: [
             { name: 'Hanoi',            x: 52, y: 10 },
@@ -28,6 +31,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'TH', name: 'Thailand', flag: '🇹🇭',
+        first: ['Somchai','Anan','Phongsak','Niran','Suchart','Worawut','Apirak','Surin','Wichai','Adisorn','Krit','Thanaphon','Boonchai','Charoen','Wirat'],
+        last:  ['Wongsuwan','Thongdee','Saetang','Srisai','Phromma','Boonmee','Suksai','Kaewkhao','Chaiprasit','Inthanon','Rattana','Phongphan','Saengsai','Phanthong','Charoenchai'],
         outline: '28,18 50,12 70,18 78,28 74,40 66,50 60,58 56,70 52,82 48,92 52,82 56,70 44,60 32,52 26,42 24,30',
         cities: [
             { name: 'Bangkok',         x: 50, y: 55 },
@@ -45,6 +50,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'ID', name: 'Indonesia', flag: '🇮🇩',
+        first: ['Andi','Budi','Cahya','Dimas','Eko','Fajar','Gilang','Hari','Indra','Joko','Kris','Lutfi','Maulana','Nanda','Putra','Rudi','Surya','Teguh','Wahyu','Yusuf'],
+        last:  ['Pratama','Saputra','Susanto','Wijaya','Hidayat','Setiawan','Permana','Nugroho','Kusuma','Santoso','Hartono','Hakim','Lesmana','Mahendra','Suryana'],
         outline: '4,42 18,36 30,40 44,38 60,42 76,46 88,42 94,52 86,60 70,58 54,55 38,58 22,55 10,52',
         cities: [
             { name: 'Jakarta',         x: 28, y: 50 },
@@ -62,6 +69,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'MY', name: 'Malaysia', flag: '🇲🇾',
+        first: ['Ahmad','Mohd','Faizal','Hafiz','Idris','Khairul','Razak','Syafiq','Zulkifli','Amir','Hakim','Naim','Iskandar','Roslan','Asyraf'],
+        last:  ['Rahim','Hassan','Ismail','Yusof','Othman','Mahmud','Aziz','Salleh','Daud','Latif','Karim','Halim','Wahid','Idris','Razali'],
         outline: '8,55 18,48 30,50 38,55 42,62 38,70 28,72 20,70 14,64',
         cities: [
             { name: 'Kuala Lumpur',    x: 28, y: 60 },
@@ -79,6 +88,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'PH', name: 'Philippines', flag: '🇵🇭',
+        first: ['Carlos','Juan','Miguel','Jose','Antonio','Marco','Diego','Rafael','Andres','Gabriel','Emilio','Fernando','Mateo','Lorenzo','Sebastian'],
+        last:  ['Santos','Reyes','Cruz','Bautista','Garcia','Mendoza','Torres','Castro','Aquino','Dela Cruz','Tan','Domingo','Villanueva','Ramos','Gonzales'],
         outline: '40,12 56,10 60,22 58,32 62,42 58,52 62,62 58,72 54,82 48,80 42,72 38,62 40,52 38,42 42,32 40,22',
         cities: [
             { name: 'Manila',          x: 48, y: 32 },
@@ -96,6 +107,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'SG', name: 'Singapore', flag: '🇸🇬',
+        first: ['Wei','Jun','Hao','Cheng','Hakim','Faris','Arjun','Ravi','Aiden','Daniel','Marcus','Edwin','Adam','Hassan','Kumar'],
+        last:  ['Tan','Lim','Wong','Lee','Goh','Chua','Ng','Ong','Teo','Yeo','Singh','Kumar','Rahman','Cheng','Toh'],
         outline: '20,40 42,36 60,38 76,44 74,52 60,58 42,58 24,52 18,46',
         cities: [
             { name: 'Bishan',          x: 50, y: 45 },
@@ -113,6 +126,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'MM', name: 'Myanmar', flag: '🇲🇲',
+        first: ['Aung','Kyaw','Hlaing','Soe','Zaw','Naing','Nyein','Win','Thiha','Htet','Phyo','Lwin','Min','Tun','Maung'],
+        last:  ['Aye','Thu','Moe','Lin','Oo','Khin','Maung','Htun','Hein','Paing','Soe','Naing','Naung','Yi','Phyu'],
         outline: '42,4 56,8 60,18 56,30 52,42 48,55 44,68 40,80 38,90 42,82 46,70 50,55 48,42 44,30 40,18',
         cities: [
             { name: 'Yangon',          x: 45, y: 58 },
@@ -130,6 +145,9 @@ window.SEA_NATIONS = [
     },
     {
         code: 'KH', name: 'Cambodia', flag: '🇰🇭',
+        format: 'last_first',
+        first: ['Sok','Chan','Vannak','Sothy','Bopha','Channary','Pisey','Veasna','Rithy','Sambath','Saroeun','Phally','Sopheak','Chamroeun','Visal'],
+        last:  ['Sun','Keo','Khim','Chan','Sok','Lao','Prak','Sieng','Sophal','Cheng','Hou','Ros','Ung','Long','Pich'],
         outline: '20,32 50,26 70,32 78,46 70,60 55,68 38,66 25,56 18,42',
         cities: [
             { name: 'Phnom Penh',      x: 50, y: 52 },
@@ -147,6 +165,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'LA', name: 'Laos', flag: '🇱🇦',
+        first: ['Bounmy','Khamla','Somsack','Phonsavanh','Vongphachan','Khampheng','Anousone','Bounthavong','Saykham','Vilayphone','Khambay','Phouvong','Sengphet','Vongchanh','Khamsing'],
+        last:  ['Sayasane','Vongchiengkham','Phomsouvanh','Inthala','Singdala','Vichit','Bounkong','Khounchaleun','Sayalat','Senesouvanh','Souvann','Phaiboun','Sinthavong','Sysongkham','Phimphraphone'],
         outline: '36,6 56,10 62,22 60,34 64,46 60,58 56,70 52,82 48,90 42,82 40,68 36,52 32,38 30,22',
         cities: [
             { name: 'Vientiane',       x: 42, y: 60 },
@@ -164,6 +184,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'BN', name: 'Brunei', flag: '🇧🇳',
+        first: ['Abdul','Muhammad','Hakeme','Adi','Najib','Hanif','Faiq','Helmi','Wafi','Khairul','Saiful','Razimie','Adam','Iskandar','Shahrul'],
+        last:  ['Said','Hassan','Othman','Halid','Bahar','Yusof','Bolkiah','Rahman','Hashim','Roslan','Ramli','Tahir','Ibrahim','Latif','Jamil'],
         outline: '24,36 44,32 60,36 72,44 70,56 56,62 42,60 30,52 24,44',
         cities: [
             { name: 'Bandar Seri Begawan', x: 50, y: 48 },
@@ -181,6 +203,8 @@ window.SEA_NATIONS = [
     },
     {
         code: 'TL', name: 'Timor-Leste', flag: '🇹🇱',
+        first: ['Anggisu','Almir','Patrick','Filomeno','Pedro','Murilo','Andre','Joao','Asahel','Diogo','Adelino','Henrique','Mauricio','Antonio','Rui'],
+        last:  ['Barros','Saraiva','Fabiano','Henrique','Da Silva','Sarmento','Pereira','Almeida','Soares','Boavida','Tilman','Belo','Da Costa','Fernandes','Lopes'],
         outline: '12,36 36,30 58,34 76,42 70,54 50,58 28,55 16,48',
         cities: [
             { name: 'Dili',            x: 42, y: 42 },

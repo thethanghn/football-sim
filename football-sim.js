@@ -930,7 +930,7 @@
                 return inst;
             }
 
-            constructor(teamName, excludedColor = null, restored = null) {
+            constructor(teamName, excludedColor = null, restored = null, opts = {}) {
                 // Restore path — rehydrate from a snapshot produced by serialize().
                 // Crest SVG is regenerated from the seed (don't store ~10KB of markup).
                 if (restored) {
@@ -941,6 +941,8 @@
                     this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
                     this.crestSVGSm  = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 44);
                     this.players     = Array.isArray(restored.players) ? restored.players : [];
+                    this.homeNation  = restored.homeNation || null;
+                    this.budget      = restored.budget != null ? restored.budget : null;
                     this.startingXI  = [];
                     this.bench       = [];
                     this.onField     = [];
@@ -956,6 +958,11 @@
                 this.clubName    = CrestGenerator.generateName(this.crestSeed);
                 this.crestSVG    = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 70);
                 this.crestSVGSm  = CrestGenerator.generateSVG(this.crestSeed, this.jerseyColor, 44);
+                // Home nation drives the dominant nationality in the squad.
+                // Budget drives both how many imports the club can afford and the
+                // overall quality of the roster (richer clubs sign better players).
+                this.homeNation  = opts.homeNation || null;
+                this.budget      = opts.budget != null ? opts.budget : 60;  // sensible mid-tier default
                 this.players = this.generatePlayers();
                 this.startingXI = [];
                 this.bench = [];
@@ -972,8 +979,21 @@
                     jerseyColor: this.jerseyColor,
                     clubName:    this.clubName,
                     crestSeed:   this.crestSeed,
+                    homeNation:  this.homeNation,   // { code, name, flag, first, last, format }
+                    budget:      this.budget,
                     players:     this.players,
                 };
+            }
+
+            // Rebuild the roster in place using the team's current homeNation /
+            // budget / jersey colour. Used after onboarding once we know the
+            // user's chosen nation: the initial squad was generated with neutral
+            // defaults, and we want to swap to a nation-aware roster.
+            regenerateRoster() {
+                this.players = this.generatePlayers();
+                this.startingXI = [];
+                this.bench      = [];
+                this.onField    = [];
             }
 
             // Instance wrapper — the actual roster generation is in the static
@@ -981,25 +1001,33 @@
             // dramatic-scenes test bench, future replay tools) can produce real
             // game-grade players with one call.
             generatePlayers() {
-                return Team.createRoster(this.jerseyColor, { isYouTeam: this.teamName === 'You' });
+                return Team.createRoster(this.jerseyColor, {
+                    isYouTeam:  this.teamName === 'You',
+                    homeNation: this.homeNation,
+                    budget:     this.budget,
+                });
             }
 
             // Builds a single player object with name, nationality, position,
             // attributes, avatar, instructions, morale, and per-match stat
-            // counters. Pure function — no `this` dependency. Same fields and
-            // ranges as the original inline body of generatePlayers().
+            // counters. Pure function — no `this` dependency.
             //
-            // opts.position — defaults to a sensible per-index pick (idx<2 → GK,
-            // otherwise random outfield) when omitted.
+            // opts.position     — defaults to a sensible per-index pick.
+            // opts.nation       — force a specific nation entry (overrides the
+            //                     weighted global pool). Expected shape:
+            //                     { name, flag, first[], last[], format? }.
+            // opts.qualityShift — integer applied to every position-attribute
+            //                     range (positive = star, negative = lower-tier).
+            //                     Drives the wider 50→90 spread per squad.
             static createPlayer(idx, jerseyColor, opts = {}) {
                 const outfieldPositions = ['CB', 'CB', 'CB', 'LB', 'RB', 'CM', 'CM', 'CM', 'LM', 'RM', 'ST', 'ST', 'CAM', 'CDM', 'LW', 'RW', 'CF', 'LWB', 'RWB'];
                 const position = opts.position
                     || (idx < 2 ? 'GK' : outfieldPositions[Math.floor(Math.random() * outfieldPositions.length)]);
-                const nation = pickNation();
+                const nation = opts.nation || pickNation();
                 const first  = nation.first[Math.floor(Math.random() * nation.first.length)];
                 const last   = nation.last [Math.floor(Math.random() * nation.last.length)];
                 const name   = nation.format === 'last_first' ? `${last} ${first}` : `${first} ${last}`;
-                const attributes = Team.generateAttributes(position, idx);
+                const attributes = Team.generateAttributes(position, idx, opts.qualityShift || 0);
 
                 return {
                     id: idx,
@@ -1028,17 +1056,56 @@
                 };
             }
 
+            // Budget (in M) → foreign-player ratio. Richer clubs can afford more
+            // imports, but it's a soft curve — even at 180M we cap at ~45 %.
+            static _foreignRatioFromBudget(budget) {
+                const b = (budget != null) ? budget : 60;
+                const r = (b - 25) / 280;             // 25M → 0, 130M → 0.375, 180M → ~0.55
+                return Math.max(0.02, Math.min(0.45, r));
+            }
+
+            // Budget (in M) → per-team quality shift (applied on top of the per-player
+            // rank-based shift). Centre at 60M ≈ no shift.
+            static _clubQualityFromBudget(budget) {
+                const b = (budget != null) ? budget : 60;
+                const s = Math.round((b - 60) / 4.5); // 25M → −8, 100M → +9, 150M → +20
+                return Math.max(-18, Math.min(25, s));
+            }
+
             // Builds a full 20–25-player roster. First 2 are always GKs (so the
             // squad has a starter + backup); the rest are randomised outfield
             // positions. If `opts.isYouTeam` is true, slot 6 is overwritten with
             // the hand-crafted talisman 'Nguyễn Thế Chí Vỹ' (always overall 93).
             //
-            // opts.count — explicit roster size (default 20–25 random).
+            // opts.count       — explicit roster size (default 20–25 random).
+            // opts.homeNation  — SEA nation object. Most squad members will be
+            //                    drawn from this nation; the rest are foreign.
+            // opts.budget      — drives foreign quota + overall club quality.
             static createRoster(jerseyColor, opts = {}) {
                 const count = opts.count != null ? opts.count : (20 + Math.floor(Math.random() * 6));
+                const home  = opts.homeNation || null;
+                // If the chosen home nation doesn't have name lists yet, fall
+                // back to the random global mix so we never produce nameless players.
+                const homeUsable = home && Array.isArray(home.first) && Array.isArray(home.last);
+                const foreignRatio = Team._foreignRatioFromBudget(opts.budget);
+                const clubQuality  = Team._clubQualityFromBudget(opts.budget);
+
+                // Per-player rank-based quality drop: starters (low idx) get the
+                // biggest positive shift, reserves at the tail get the largest
+                // negative shift. The two ends are roughly [+14 .. −22] before
+                // adding the club shift + ±5 jitter.
+                const rankShift = (i) => {
+                    const t = count <= 1 ? 0 : i / (count - 1);   // 0 → top, 1 → bottom
+                    return Math.round(14 - 36 * t);                // 14 → −22
+                };
+
                 const players = [];
                 for (let i = 0; i < count; i++) {
-                    players.push(Team.createPlayer(i, jerseyColor));
+                    const useHome = homeUsable && (Math.random() >= foreignRatio);
+                    const nation  = useHome ? home : null;         // null → pickNation() globally
+                    const jitter  = Random.gaussianInt(0, 5, -8, 8);
+                    const shift   = Math.max(-28, Math.min(28, clubQuality + rankShift(i) + jitter));
+                    players.push(Team.createPlayer(i, jerseyColor, { nation, qualityShift: shift }));
                 }
 
                 if (opts.isYouTeam && players[6]) {
@@ -1071,9 +1138,18 @@
                 return players;
             }
 
-            static generateAttributes(position, seed) {
+            // `qualityShift` widens (or narrows) every position-attribute range
+            // by the same amount before sampling, then clamps to [1, 99]. A
+            // shift of +20 produces a clear top-tier player; a shift of −20
+            // produces a journeyman / reserves-grade player. Used by createRoster
+            // to spread squads across the CM-style 50→90 spectrum.
+            static generateAttributes(position, seed, qualityShift = 0) {
                 const rng = AvatarGenerator.seededRandom(seed);
-                const r = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+                const r = (lo, hi) => {
+                    const lo2 = Math.max(1,  Math.min(99, lo + qualityShift));
+                    const hi2 = Math.max(lo2, Math.min(99, hi + qualityShift));
+                    return lo2 + Math.floor(rng() * (hi2 - lo2 + 1));
+                };
 
                 // CM 03/04-style attribute profiles per position
                 const P = {
@@ -2238,14 +2314,20 @@
                 }
 
                 // Adopt the new club's identity for the player team (kit + crest)
+                // and rebuild the squad to reflect the chosen nation and the
+                // club's budget (so most players are local, with a few imports
+                // and a quality spread driven by city budget).
                 if (this.playerTeam && userClub) {
                     this.playerTeam.clubName    = userClub.clubName;
                     this.playerTeam.jerseyColor = userClub.jerseyColor;
                     this.playerTeam.crestSeed   = userClub.crestSeed;
+                    this.playerTeam.homeNation  = nation;
+                    this.playerTeam.budget      = userClub.budget;
                     if (typeof CrestGenerator !== 'undefined') {
                         this.playerTeam.crestSVG   = CrestGenerator.generateSVG(userClub.crestSeed, userClub.jerseyColor, 70);
                         this.playerTeam.crestSVGSm = CrestGenerator.generateSVG(userClub.crestSeed, userClub.jerseyColor, 44);
                     }
+                    this.playerTeam.regenerateRoster();
                     GameStorage?.savePlayerTeam?.(this.playerTeam.serialize());
                 }
 
@@ -2501,42 +2583,95 @@
                     section('Bench',        bench) +
                     section('Reserves',     others);
 
+                // Persist the displayed ordering so the detail panel's Prev /
+                // Next buttons walk through players in the same visual order
+                // (XI first, then Bench, then Reserves).
+                this._squadOrder = [...xi, ...bench, ...others].map(p => p.id);
+
                 listEl.querySelectorAll('.ch-squad-row').forEach(row => {
                     row.addEventListener('click', () => {
                         const pid = parseInt(row.dataset.playerId, 10);
                         const p = this.playerTeam.players.find(x => x.id === pid);
                         if (!p) return;
-                        listEl.querySelectorAll('.ch-squad-row').forEach(r => r.classList.toggle('selected', r === row));
                         this._showSquadDetail(p);
                     });
                 });
 
-                // Wire the close affordances once per render (cloneNode wipes stale handlers)
-                const closeBtn = document.getElementById('chSquadCloseBtn');
-                if (closeBtn) {
-                    const fresh = closeBtn.cloneNode(true);
-                    closeBtn.parentNode.replaceChild(fresh, closeBtn);
-                    fresh.addEventListener('click', () => this._hideSquadDetail());
-                }
-                // Esc closes the detail overlay (one-shot listener bound to the squad view)
+                // Wire the detail-overlay controls once per render (cloneNode
+                // wipes stale handlers from the previous render).
+                const wireBtn = (id, fn) => {
+                    const btn = document.getElementById(id);
+                    if (!btn) return;
+                    const fresh = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(fresh, btn);
+                    fresh.addEventListener('click', fn);
+                };
+                wireBtn('chSquadCloseBtn', () => this._hideSquadDetail());
+                wireBtn('chSquadPrevBtn',  () => this._stepSquadDetail(-1));
+                wireBtn('chSquadNextBtn',  () => this._stepSquadDetail(+1));
+
+                // Keyboard nav (bound once): Esc closes; ←/→ step through.
                 if (!this._squadEscBound) {
                     this._squadEscBound = true;
                     document.addEventListener('keydown', (e) => {
-                        if (e.key !== 'Escape') return;
                         const overlay = document.getElementById('chSquadDetail');
-                        if (overlay?.classList.contains('active')) this._hideSquadDetail();
+                        if (!overlay?.classList.contains('active')) return;
+                        if (e.key === 'Escape')      { this._hideSquadDetail(); }
+                        else if (e.key === 'ArrowLeft')  { e.preventDefault(); this._stepSquadDetail(-1); }
+                        else if (e.key === 'ArrowRight') { e.preventDefault(); this._stepSquadDetail(+1); }
                     });
                 }
             }
 
             // Show/hide the absolutely-positioned detail overlay over the squad list.
             _showSquadDetail(player) {
+                if (!player) return;
+                // Track where in the displayed squad order this player sits so
+                // Prev / Next can step from here. _squadOrder is filled by the
+                // most recent _renderClubhouseSquad().
+                this._squadIdx = (this._squadOrder || []).indexOf(player.id);
                 this._renderSquadDetail(player);
+                this._refreshSquadNav();
+                this._highlightSquadRow(player.id);
                 const overlay = document.getElementById('chSquadDetail');
                 if (overlay) {
                     overlay.classList.add('active');
                     overlay.setAttribute('aria-hidden', 'false');
                 }
+                // Auto-scroll the row into view so navigating off-screen still
+                // keeps the list context visible.
+                document.querySelector(`.ch-squad-row[data-player-id="${player.id}"]`)
+                    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+
+            // Move to the previous / next player in the displayed squad order.
+            // Wraps at the ends (clicking Next on the last player jumps back to
+            // the top), so the overlay never gets "stuck".
+            _stepSquadDetail(delta) {
+                const order = this._squadOrder || [];
+                if (!order.length) return;
+                const len = order.length;
+                const idx = (((this._squadIdx ?? 0) + delta) % len + len) % len;
+                const pid = order[idx];
+                const p   = this.playerTeam?.players?.find(x => x.id === pid);
+                if (p) this._showSquadDetail(p);
+            }
+
+            // Update the "i / N" counter (Prev/Next are always enabled — we wrap).
+            _refreshSquadNav() {
+                const label = document.getElementById('chSquadNavLabel');
+                const order = this._squadOrder || [];
+                if (label) {
+                    label.textContent = order.length
+                        ? `${(this._squadIdx ?? 0) + 1} / ${order.length}`
+                        : '— / —';
+                }
+            }
+
+            _highlightSquadRow(playerId) {
+                document.querySelectorAll('.ch-squad-row').forEach(r => {
+                    r.classList.toggle('selected', parseInt(r.dataset.playerId, 10) === playerId);
+                });
             }
 
             _hideSquadDetail() {
@@ -3419,8 +3554,11 @@
                     console.log('CPU formation:', this.cpuFormation);
 
                     console.log('Creating CPU team...');
-                    // playerTeam already set up via management panel
-                    this.cpuTeam = new Team('CPU', this.playerTeam.jerseyColor);
+                    // playerTeam already set up via management panel.
+                    // If we have a league, draw the opponent from the table so the
+                    // CPU side carries a real club identity (crest, kit, budget) and
+                    // its squad is generated with the right home nation + budget.
+                    this.cpuTeam = this._buildCpuOpponent();
                     console.log('CPU team created successfully');
 
                     console.log('Setting up CPU squad...');
@@ -3540,6 +3678,41 @@
             getRandomFormation() {
                 const formations = ['442', '433', '451', '532', '541', '352', '343'];
                 return formations[Math.floor(Math.random() * formations.length)];
+            }
+
+            // Build the CPU side for a match. Prefers a real opposing club from
+            // the saved league (so we get a proper crest, kit and budget-driven
+            // squad). Falls back to a neutral random team when no league exists
+            // (e.g. before onboarding, or on a wiped career).
+            _buildCpuOpponent() {
+                const mgr     = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                const league  = (typeof GameStorage !== 'undefined') ? GameStorage.loadLeague() : null;
+                const homeCode = mgr?.nation;
+                const homeNation = (homeCode && typeof SEA_NATIONS !== 'undefined')
+                    ? SEA_NATIONS.find(n => n.code === homeCode) : null;
+
+                if (Array.isArray(league) && league.length > 1) {
+                    const opponents = league.filter(c => !c.isUserClub);
+                    if (opponents.length) {
+                        const club = opponents[Math.floor(Math.random() * opponents.length)];
+                        const cpu = new Team('CPU', this.playerTeam.jerseyColor, null, {
+                            homeNation, budget: club.budget,
+                        });
+                        // Overwrite the auto-rolled identity with the league club's,
+                        // and rebuild the crest from its seed so visuals stay stable.
+                        cpu.clubName    = club.clubName;
+                        cpu.jerseyColor = club.jerseyColor;
+                        cpu.crestSeed   = club.crestSeed;
+                        if (typeof CrestGenerator !== 'undefined') {
+                            cpu.crestSVG   = CrestGenerator.generateSVG(club.crestSeed, club.jerseyColor, 70);
+                            cpu.crestSVGSm = CrestGenerator.generateSVG(club.crestSeed, club.jerseyColor, 44);
+                        }
+                        return cpu;
+                    }
+                }
+
+                // No league saved — degrade to the previous behaviour.
+                return new Team('CPU', this.playerTeam.jerseyColor, null, { homeNation });
             }
 
             // ─── CPU manager AI: reactively change formation based on match state ───

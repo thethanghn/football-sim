@@ -46,13 +46,31 @@ class LeagueGenerator {
         };
     }
 
-    static _buildClub(city, isUser, colour, suffix) {
+    // Big cities trend wealthier than small towns, but only as a soft signal —
+    // a third-tier town can occasionally fluke into a wealthy patron. Cities are
+    // listed in roughly population-descending order in onboarding-data.js, so
+    // we use the city's position as a size proxy:
+    //   index 0 (capital-ish)  → base ≈ 100M
+    //   tail of the list       → base ≈ 30M
+    // Then multiplied by Normal(1.0, 0.30) for variance, clamped to a sane range.
+    // Returns budget in "millions" (no real currency — purely a relative scale
+    // used to drive foreign quota + squad quality).
+    static _rollBudget(sizeIndex, citiesTotal) {
+        const span = Math.max(1, citiesTotal - 1);
+        const t = Math.min(1, sizeIndex / span);                 // 0 (big) → 1 (small)
+        const base = 100 - 70 * t;                                // 100M → 30M
+        const noise = Random.gaussianFloat(1.0, 0.30, 0.45, 1.70);
+        return Math.round(Math.max(12, Math.min(180, base * noise)));
+    }
+
+    static _buildClub(city, isUser, colour, suffix, sizeIndex, citiesTotal) {
         return {
             cityName:    city.name,
             clubName:    `${city.name} ${suffix}`,
             jerseyColor: colour,
             crestSeed:   Math.floor(Math.random() * 99999),
             isUserClub:  !!isUser,
+            budget:      this._rollBudget(sizeIndex, citiesTotal),
             ...this._emptyTableRow(),
         };
     }
@@ -69,11 +87,15 @@ class LeagueGenerator {
             return [];
         }
 
-        const user = nation.cities.find(c => c.name === userCity) || nation.cities[0];
+        // Preserve each city's index in the nation's list — that's our "size"
+        // proxy (capital/major hubs are listed first in onboarding-data.js).
+        const indexed = nation.cities.map((c, i) => ({ city: c, sizeIndex: i }));
+        const total   = nation.cities.length;
+        const user    = indexed.find(e => e.city.name === userCity) || indexed[0];
 
         // Pick 9 other cities (or fewer if the nation lists fewer than 10).
-        const others = nation.cities
-            .filter(c => c.name !== user.name)
+        const others = indexed
+            .filter(e => e.city.name !== user.city.name)
             .slice(0, this.LEAGUE_SIZE - 1);
 
         // Distinct suffix + colour per club so the table isn't a sea of duplicates.
@@ -81,9 +103,9 @@ class LeagueGenerator {
         const suffixes = this._sample(this.SUFFIXES, others.length + 1);
 
         const clubs = [];
-        clubs.push(this._buildClub(user, true, colours[0], suffixes[0]));
-        others.forEach((c, i) => {
-            clubs.push(this._buildClub(c, false, colours[i + 1], suffixes[i + 1]));
+        clubs.push(this._buildClub(user.city, true, colours[0], suffixes[0], user.sizeIndex, total));
+        others.forEach((e, i) => {
+            clubs.push(this._buildClub(e.city, false, colours[i + 1], suffixes[i + 1], e.sizeIndex, total));
         });
 
         return clubs;

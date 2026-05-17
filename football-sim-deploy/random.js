@@ -88,4 +88,10 @@ class Random {
         const v = Math.round(Random.gaussian(mean, std, rng));
         return Math.max(lo, Math.min(hi, v));
     }
+
+    /** Sample a Normal(mean, std) clamped to [lo, hi] (float). */
+    static gaussianFloat(mean, std, lo, hi, rng = Math.random) {
+        const v = Random.gaussian(mean, std, rng);
+        return Math.max(lo, Math.min(hi, v));
+    }
 }
