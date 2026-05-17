@@ -2089,14 +2089,14 @@
         }
         .ch-squad-row {
             display: grid;
-            grid-template-columns: 28px 28px 1fr 64px 36px;
-            gap: 8px;
+            grid-template-columns: 28px 44px 1fr 64px 36px;
+            gap: 10px;
             align-items: center;
-            padding: 7px 10px;
+            padding: 6px 10px;
             border-radius: 4px;
             cursor: pointer;
             color: #ddd;
-            font-size: 12px;
+            font-size: 13px;
             border: 1px solid transparent;
         }
         .ch-squad-row:hover { background: rgba(255,255,255,0.04); }
@@ -2106,8 +2106,9 @@
         }
         .ch-squad-row .csr-num    { color: #888; font-weight: 700; text-align: right; }
         .ch-squad-row .csr-avatar {
-            width: 28px; height: 28px;
-            border-radius: 50%; overflow: hidden; background: #1a1a1a;
+            width: 44px; height: 44px;
+            border-radius: 50%; overflow: hidden;
+            background: linear-gradient(180deg, #2c2c34 0%, #16161c 100%);
             border: 1px solid #333;
         }
         .ch-squad-row .csr-avatar svg { width: 100%; height: 100%; display: block; }
@@ -2280,7 +2281,7 @@
          the [data-screen] placeholders below. football-sim.js's bootstrap
          waits for the 'screensReady' event before calling getElementById on
          injected nodes. -->
-    <script src="screens/screen-loader.js?v=14"></script>
+    <script src="screens/screen-loader.js?v=17"></script>
 </head>
 <body>
     <!-- Top floating menu bar (always visible) -->
@@ -2652,25 +2653,25 @@
     <!-- SVG.js — programmatic SVG drawing / manipulation. Exposes global `SVG`. -->
     <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2.4/dist/svg.min.js"></script>
 
-    <script src="audio.js?v=14"></script>
-    <script src="dramatic.js?v=14"></script>
+    <script src="audio.js?v=17"></script>
+    <script src="dramatic.js?v=17"></script>
     <!-- DramaticScenes — namespace + helpers must load before any individual scene file -->
-    <script src="dramatic-scenes/_helpers.js?v=14"></script>
-    <script src="dramatic-scenes/goal.js?v=14"></script>
-    <script src="dramatic-scenes/freekick.js?v=14"></script>
-    <script src="dramatic-scenes/kickoff.js?v=14"></script>
-    <script src="dramatic-scenes/corner.js?v=14"></script>
-    <script src="dramatic-scenes/redCard.js?v=14"></script>
-    <script src="dramatic-scenes/disallowed.js?v=14"></script>
-    <script src="dramatic-scenes/penalty.js?v=14"></script>
-    <script src="dramatic-scenes/injury.js?v=14"></script>
-    <script src="random.js?v=14"></script>
-    <script src="storage.js?v=14"></script>
-    <script src="screens/onboarding-data.js?v=14"></script>
-    <script src="league-generator.js?v=14"></script>
-    <script src="game-flow.js?v=14"></script>
-    <script src="zone-strength.js?v=14"></script>
-    <script src="football-sim.js?v=14"></script>
-    <script src="phaser-badge.js?v=14"></script>
+    <script src="dramatic-scenes/_helpers.js?v=17"></script>
+    <script src="dramatic-scenes/goal.js?v=17"></script>
+    <script src="dramatic-scenes/freekick.js?v=17"></script>
+    <script src="dramatic-scenes/kickoff.js?v=17"></script>
+    <script src="dramatic-scenes/corner.js?v=17"></script>
+    <script src="dramatic-scenes/redCard.js?v=17"></script>
+    <script src="dramatic-scenes/disallowed.js?v=17"></script>
+    <script src="dramatic-scenes/penalty.js?v=17"></script>
+    <script src="dramatic-scenes/injury.js?v=17"></script>
+    <script src="random.js?v=17"></script>
+    <script src="storage.js?v=17"></script>
+    <script src="screens/onboarding-data.js?v=17"></script>
+    <script src="league-generator.js?v=17"></script>
+    <script src="game-flow.js?v=17"></script>
+    <script src="zone-strength.js?v=17"></script>
+    <script src="football-sim.js?v=17"></script>
+    <script src="phaser-badge.js?v=17"></script>
 </body>
 </html>

@@ -355,6 +355,19 @@
                 return draw.svg();
             }
 
+            // Head-and-neck portrait — no jersey, no arms, no card backdrop. The
+            // viewbox is cropped tight around the face so the head appears much
+            // bigger inside a small frame (used by the Clubhouse squad list).
+            // Suitable for circular cropping via CSS (border-radius: 50%).
+            static createHeadSVG(avatar, size = 44) {
+                // Head ellipse sits at (50, 37) rx=17 ry=21 → spans y 16..58;
+                // neck ends at y≈63. A 60×60 viewbox centred horizontally with
+                // the face in the upper half gives a clean portrait crop.
+                const draw = SVG().size(size, size).viewbox(20, 10, 60, 60);
+                this.drawFigure(avatar, draw, null, { headOnly: true });
+                return draw.svg();
+            }
+
             // Paints the sky-blue gradient card backdrop (rounded rect, horizon line,
             // shadow ellipse) into the supplied SVG.js draw root. Independent of any
             // avatar data — used only by the standard card composition.
@@ -375,7 +388,10 @@
             // positioned in the standard 0–100 viewbox: head at (50, 37), shoulders
             // at y≈63, jersey extends to y=100. Gradients are scoped to `draw`.
             // No background drawn — caller is responsible for the canvas / backdrop.
-            static drawFigure(avatar, draw, jerseyOverride = null) {
+            //
+            // opts.headOnly — skip arms + jersey body (still paints the neck). Used by
+            // createHeadSVG for portrait-style avatars in compact lists.
+            static drawFigure(avatar, draw, jerseyOverride = null, opts = {}) {
                 const sk  = avatar.skin;
                 const skD = this.shade(sk, -20);
                 const skL = this.shade(sk,  18);
@@ -393,35 +409,39 @@
                     add.stop(0, skL); add.stop(1, skD);
                 }).from(0.25, 0).to(1, 1);
 
-                const jrGrad = draw.gradient('linear', add => {
-                    add.stop(0,    jerD);
-                    add.stop(0.25, jer);
-                    add.stop(0.75, jer);
-                    add.stop(1,    jerD);
-                }).from(0, 0).to(1, 0);
+                // Jersey gradients are only needed when we're actually painting
+                // jersey + arms — head-only portraits skip the cost.
+                let jrGrad = null, jrvGrad = null;
+                if (!opts.headOnly) {
+                    jrGrad = draw.gradient('linear', add => {
+                        add.stop(0,    jerD);
+                        add.stop(0.25, jer);
+                        add.stop(0.75, jer);
+                        add.stop(1,    jerD);
+                    }).from(0, 0).to(1, 0);
+                    jrvGrad = draw.gradient('linear', add => {
+                        add.stop(0, jerL, 0.4);
+                        add.stop(1, jerD, 0.3);
+                    }).from(0, 0).to(0, 1);
 
-                const jrvGrad = draw.gradient('linear', add => {
-                    add.stop(0, jerL, 0.4);
-                    add.stop(1, jerD, 0.3);
-                }).from(0, 0).to(0, 1);
+                    // ── Arms ───────────────────────────────────────────────────
+                    draw.path(`M${bx+4},65 L${bx-13},72 L${bx-14},94 L${bx+4},90 Z`).fill(jrGrad);
+                    draw.path(`M${bx+bw-4},65 L${bx+bw+13},72 L${bx+bw+14},94 L${bx+bw-4},90 Z`).fill(jrGrad);
+                    draw.ellipse(9, 6).center(bx-11, 95).fill(sk).opacity(0.9);
+                    draw.ellipse(9, 6).center(bx+bw+11, 95).fill(sk).opacity(0.9);
 
-                // ── Arms ───────────────────────────────────────────────────
-                draw.path(`M${bx+4},65 L${bx-13},72 L${bx-14},94 L${bx+4},90 Z`).fill(jrGrad);
-                draw.path(`M${bx+bw-4},65 L${bx+bw+13},72 L${bx+bw+14},94 L${bx+bw-4},90 Z`).fill(jrGrad);
-                draw.ellipse(9, 6).center(bx-11, 95).fill(sk).opacity(0.9);
-                draw.ellipse(9, 6).center(bx+bw+11, 95).fill(sk).opacity(0.9);
+                    // ── Jersey body ────────────────────────────────────────────
+                    draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrGrad);
+                    draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrvGrad);
+                    draw.path(`M${bx},63 L${bx+7},63 L${bx+3},100 L${bx-5},100 Z`).fill('rgba(0,0,0,0.08)');
+                    draw.path(`M${bx+bw},63 L${bx+bw-7},63 L${bx+bw-3},100 L${bx+bw+5},100 Z`).fill('rgba(0,0,0,0.08)');
 
-                // ── Jersey body ────────────────────────────────────────────
-                draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrGrad);
-                draw.path(`M${bx},63 Q50,60 ${bx+bw},63 L${bx+bw+5},100 L${bx-5},100 Z`).fill(jrvGrad);
-                draw.path(`M${bx},63 L${bx+7},63 L${bx+3},100 L${bx-5},100 Z`).fill('rgba(0,0,0,0.08)');
-                draw.path(`M${bx+bw},63 L${bx+bw-7},63 L${bx+bw-3},100 L${bx+bw+5},100 Z`).fill('rgba(0,0,0,0.08)');
+                    draw.polygon(`${50-8},63 50,73 ${50+8},63`).fill(jerD);
+                    draw.polygon(`${50-6},63 50,71 ${50+6},63`).fill(sk).opacity(0.15);
 
-                draw.polygon(`${50-8},63 50,73 ${50+8},63`).fill(jerD);
-                draw.polygon(`${50-6},63 50,71 ${50+6},63`).fill(sk).opacity(0.15);
-
-                draw.path(`M${bx},63 Q${bx+5},61 ${bx+14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
-                draw.path(`M${bx+bw},63 Q${bx+bw-5},61 ${bx+bw-14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
+                    draw.path(`M${bx},63 Q${bx+5},61 ${bx+14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
+                    draw.path(`M${bx+bw},63 Q${bx+bw-5},61 ${bx+bw-14},63`).fill('none').stroke({ color: jerL, width: 1.2, opacity: 0.55 });
+                }
 
                 // ── Neck ───────────────────────────────────────────────────
                 draw.path(`M45,55 Q50,53 55,55 L55.5,63 Q50,61 44.5,63 Z`).fill(sk);
@@ -1027,7 +1047,10 @@
                 const first  = nation.first[Math.floor(Math.random() * nation.first.length)];
                 const last   = nation.last [Math.floor(Math.random() * nation.last.length)];
                 const name   = nation.format === 'last_first' ? `${last} ${first}` : `${first} ${last}`;
-                const attributes = Team.generateAttributes(position, idx, opts.qualityShift || 0);
+                // Roll height first so generateAttributes can bias `heading` by
+                // it (tall players head better — see Team.generateAttributes).
+                const height = Team.randomHeight(position);
+                const attributes = Team.generateAttributes(position, idx, opts.qualityShift || 0, { height });
 
                 return {
                     id: idx,
@@ -1039,7 +1062,7 @@
                     secondaryPositions: Team.randomSecondaries(position), // 0.88× efficiency
                     number: idx + 1,
                     age:    Team.randomAge(),
-                    height: Team.randomHeight(position),    // cm
+                    height,                                 // cm — also influences heading
                     foot:   Team.randomFoot(),              // 'right' | 'left' | 'both'
                     appearances: 0,
                     goals: 0,
@@ -1143,7 +1166,7 @@
             // shift of +20 produces a clear top-tier player; a shift of −20
             // produces a journeyman / reserves-grade player. Used by createRoster
             // to spread squads across the CM-style 50→90 spectrum.
-            static generateAttributes(position, seed, qualityShift = 0) {
+            static generateAttributes(position, seed, qualityShift = 0, opts = {}) {
                 const rng = AvatarGenerator.seededRandom(seed);
                 const r = (lo, hi) => {
                     const lo2 = Math.max(1,  Math.min(99, lo + qualityShift));
@@ -1176,7 +1199,19 @@
                     attrs[key] = r(lo, hi);
                 }
 
-                // Position-weighted overall rating for squad selection sorting
+                // Height contributes to heading. Reference is a universal 180 cm
+                // (~global outfield average), 0.6 points per cm of deviation.
+                //   195 cm → +9 heading · 175 cm → −3 · 165 cm → −9
+                // A tall winger heads better than a short winger even though both
+                // play in a low-heading role; a tall ST is a real aerial threat.
+                if (opts.height != null) {
+                    const bias = Math.round((opts.height - 180) * 0.6);
+                    attrs.heading = Math.max(1, Math.min(99, (attrs.heading || 0) + bias));
+                }
+
+                // Position-weighted overall rating for squad selection sorting.
+                // Run AFTER the height adjustment so the adjusted heading flows
+                // into the overall (CB / ST weight heading heavily).
                 attrs.overall = Math.round(Team.computeOverall(position, attrs));
 
                 // Backward-compatible aliases used by display and legacy logic
@@ -1184,7 +1219,6 @@
                 attrs.speed     = attrs.pace;
                 attrs.offensive = attrs.offTheBall;
                 attrs.defensive = attrs.positioning;
-                attrs.heading   = attrs.heading;   // already set
 
                 attrs.influence = r(55, 99);
                 attrs.luck      = r(0, 99);
@@ -2328,6 +2362,11 @@
                         this.playerTeam.crestSVGSm = CrestGenerator.generateSVG(userClub.crestSeed, userClub.jerseyColor, 44);
                     }
                     this.playerTeam.regenerateRoster();
+                    // regenerateRoster clears startingXI / bench / onField — re-pick
+                    // the XI so the Clubhouse squad view groups players correctly
+                    // (Starting XI / Bench / Reserves) rather than dumping everyone
+                    // into the Reserves bucket.
+                    this.playerTeam.setupSquad(this.playerFormation);
                     GameStorage?.savePlayerTeam?.(this.playerTeam.serialize());
                 }
 
@@ -2562,8 +2601,10 @@
                                  : ovr >= 70 ? 'ovr-70' : ovr >= 60 ? 'ovr-60'
                                  : ovr >= 50 ? 'ovr-50' : 'ovr-40';
                     const flag = p.flag ? `<span class="csr-flag">${p.flag}</span>` : '';
+                    // Portrait avatar — face + neck, no jersey/arms, so the head reads
+                    // clearly at a small size. Bigger circle (44px) for legibility.
                     const av = (typeof AvatarGenerator !== 'undefined' && p.avatar)
-                        ? AvatarGenerator.createSVG(p.avatar, 28, this.playerTeam.jerseyColor)
+                        ? AvatarGenerator.createHeadSVG(p.avatar, 44)
                         : '';
                     return `<div class="ch-squad-row" data-player-id="${p.id}">
                         <span class="csr-num">${p.number ?? '·'}</span>
