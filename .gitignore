@@ -1,0 +1,11 @@
+# Vercel project link + build cache
+.vercel
+
+# Netlify auth state (left from the previous deploy setup)
+.netlify
+
+# Local Claude Code config
+.claude
+
+# macOS
+.DS_Store
