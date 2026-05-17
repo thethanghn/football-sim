@@ -159,6 +159,60 @@ class LeagueGenerator {
         return [...firstLeg, ...secondLeg];
     }
 
+    // Detect old single-leg saves (n-1 rounds instead of 2(n-1)) and append a
+    // mirror second leg. Preserves any played results in the first leg, and
+    // continues calendar dates from where the first leg left off (weekly
+    // cadence, same alternating Sat/Sun pattern as scheduleFixtures).
+    // Returns the input unchanged when both legs are already present.
+    static backfillSecondLegIfMissing(rounds, league) {
+        if (!Array.isArray(rounds) || !rounds.length) return rounds;
+        const clubCount = Array.isArray(league) ? league.length : 0;
+        if (clubCount < 2) return rounds;
+
+        const n = clubCount + (clubCount % 2 === 0 ? 0 : 1);
+        const expected = 2 * (n - 1);
+        if (rounds.length >= expected) return rounds;
+
+        // Only auto-upgrade exact-first-leg shape (n-1 rounds). Anything else
+        // is unrecognised — leave it alone rather than guess.
+        if (rounds.length !== n - 1) return rounds;
+
+        const numRounds = rounds.length;
+        const secondLeg = rounds.map((r, idx) => ({
+            round: numRounds + idx + 1,
+            matches: (r.matches || []).map(m => ({
+                home: m.away, away: m.home,
+                played: false, homeScore: null, awayScore: null,
+            })),
+        }));
+
+        // Continue the calendar from the last first-leg date if present.
+        const lastDate = rounds[rounds.length - 1]?.date;
+        if (lastDate) {
+            const start = new Date(lastDate);
+            if (!isNaN(start.getTime())) {
+                secondLeg.forEach((rd, i) => {
+                    const d = new Date(start);
+                    // i+1 so the first second-leg round lands one week after
+                    // the last first-leg round; alternate Sat/Sun parity is
+                    // preserved by including the +(i%2===1?1:0) offset
+                    // against the global round index.
+                    const globalIdx = numRounds + i;
+                    d.setDate(d.getDate() + (i + 1) * 7);
+                    // Re-anchor to Sat/Sun by absolute round parity
+                    const wantSunday = globalIdx % 2 === 1;
+                    const day = d.getDay();          // 0=Sun..6=Sat
+                    const target = wantSunday ? 0 : 6;
+                    const delta = (target - day + 7) % 7;
+                    d.setDate(d.getDate() + delta);
+                    rd.date = d.toISOString().slice(0, 10);
+                });
+            }
+        }
+
+        return [...rounds, ...secondLeg];
+    }
+
     // Decorate each round with a calendar date, starting at `kickoffDate`
     // and spacing one round every 7 days. Per-round day-of-week alternates
     // between Saturday and Sunday (kickoff anchors round 1).
@@ -234,18 +288,114 @@ class LeagueGenerator {
         return league;
     }
 
+    // Ensure a club has a persistent player roster — once generated, the same
+    // objects accumulate career goals/assists across every simulated match for
+    // the rest of the season. Uses Team.createPlayer (available at runtime)
+    // so the roster has the same shape as a real Team's players. Nation is
+    // passed in so the names match the league's home country.
+    //
+    // No-ops when the club already has a roster or when Team isn't loaded.
+    static ensureRoster(club, nation, count = 18) {
+        if (!club || (Array.isArray(club.players) && club.players.length >= 11)) return;
+        const TeamCls = (typeof Team !== 'undefined') ? Team
+                      : (typeof window !== 'undefined' && window.Team) ? window.Team : null;
+        if (!TeamCls?.createPlayer) return;
+
+        // Spread the budget shift across the roster so richer clubs really
+        // do field stronger players. Range mirrors what Team uses internally.
+        const qualityShift = Math.round(((club.budget || 60) - 60) * 0.25);
+        // Position distribution for a 16-18 player squad: 2 GK + 5 DEF + 6 MID + 5 FWD
+        const positions = ['GK','GK','CB','CB','CB','LB','RB','CDM','CM','CM','CAM','LM','RM','LW','RW','ST','ST','CF'].slice(0, count);
+
+        club.players = positions.map((pos, idx) => {
+            const p = TeamCls.createPlayer(idx, club.jerseyColor, { nation, qualityShift, position: pos });
+            // Career counters used by the league-wide top-scorer aggregator.
+            p.goals   = p.goals   || 0;
+            p.assists = p.assists || 0;
+            return p;
+        });
+    }
+
+    // Pick a "scorer" from a club's players, weighted by their finishing/off-
+    // the-ball ability and biased toward forward positions. Returns null if
+    // the club has no roster.
+    static _pickScorer(club, excludeId) {
+        const pool = (club?.players || []).filter(p => p.id !== excludeId && p.position !== 'GK');
+        if (!pool.length) return null;
+        const positionBias = { ST: 6, CF: 6, LW: 4, RW: 4, CAM: 4, LM: 2, RM: 2, CM: 2, CDM: 1, CB: 1, LB: 1, RB: 1, LWB: 1, RWB: 1 };
+        const weights = pool.map(p => {
+            const skill = ((p.finishing || p.shooting || 60) + (p.offTheBall || p.offensive || 60)) / 2;
+            return Math.max(1, skill / 10) * (positionBias[p.position] || 1);
+        });
+        const total = weights.reduce((s, w) => s + w, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
+        return pool[pool.length - 1];
+    }
+
+    // Pick an "assister" — playmakers (creativity/passing/vision), biased away
+    // from defenders. excludeId stops the scorer assisting themselves.
+    static _pickAssister(club, excludeId) {
+        const pool = (club?.players || []).filter(p => p.id !== excludeId && p.position !== 'GK');
+        if (!pool.length) return null;
+        const positionBias = { CAM: 6, CM: 4, LW: 4, RW: 4, LM: 3, RM: 3, CDM: 2, ST: 2, CF: 2, LB: 1, RB: 1, LWB: 1, RWB: 1, CB: 1 };
+        const weights = pool.map(p => {
+            const skill = ((p.creativity || 60) + (p.passing || 60) + (p.vision || 60)) / 3;
+            return Math.max(1, skill / 10) * (positionBias[p.position] || 1);
+        });
+        const total = weights.reduce((s, w) => s + w, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < pool.length; i++) { r -= weights[i]; if (r <= 0) return pool[i]; }
+        return pool[pool.length - 1];
+    }
+
+    // Run a CPU-vs-CPU match: same score generation as simulateScore, plus
+    // per-goal scorer + (60%-chance) assister attribution that mutates each
+    // club's player.goals / player.assists. Returns the score so callers can
+    // feed it to applyResult.
+    //
+    // ensureRoster MUST have been called for both clubs first (caller's job).
+    static simulateMatch(home, away) {
+        const { home: homeGoals, away: awayGoals } = this.simulateScore(home?.budget || 60, away?.budget || 60);
+        const attribute = (club, goals) => {
+            for (let i = 0; i < goals; i++) {
+                const scorer = this._pickScorer(club);
+                if (!scorer) continue;
+                scorer.goals = (scorer.goals || 0) + 1;
+                if (Math.random() < 0.62) {
+                    const assister = this._pickAssister(club, scorer.id);
+                    if (assister) assister.assists = (assister.assists || 0) + 1;
+                }
+            }
+        };
+        attribute(home, homeGoals);
+        attribute(away, awayGoals);
+        return { home: homeGoals, away: awayGoals };
+    }
+
     // Simulate every UNPLAYED match in a round and apply each result to the
     // league standings. `skipPredicate(match)` is given each match — return
     // true to leave it alone (used to skip the user's already-played match).
-    // Mutates both `round.matches` and `league`. Returns the round.
-    static simulateRound(round, league, skipPredicate = () => false) {
+    // Mutates both `round.matches` and `league` (including each club's
+    // `players[]` career stats via simulateMatch). Returns the round.
+    static simulateRound(round, league, skipPredicate = () => false, opts = {}) {
         if (!round?.matches) return round;
+        const findClub = (name) => (league || []).find(c => c.clubName === name);
+        // Lazy roster pass: a saved league from before this change won't have
+        // `players[]` populated. Caller can pre-run ensureRoster on every club
+        // (preferred); we do a best-effort here for robustness.
+        if (opts.nation && Array.isArray(league)) {
+            league.forEach(c => this.ensureRoster(c, opts.nation));
+        }
         round.matches.forEach(m => {
             if (m.played) return;
             if (skipPredicate(m)) return;
-            const home = league.find(c => c.clubName === m.home);
-            const away = league.find(c => c.clubName === m.away);
-            const score = this.simulateScore(home?.budget || 60, away?.budget || 60);
+            const home = findClub(m.home);
+            const away = findClub(m.away);
+            // simulateMatch picks scorers/assisters from each club's persistent
+            // roster and updates their career stats — so the league-wide top
+            // scorer / top assist tables get full coverage, not just user games.
+            const score = this.simulateMatch(home, away);
             m.homeScore = score.home;
             m.awayScore = score.away;
             m.played    = true;

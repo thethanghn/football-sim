@@ -224,15 +224,11 @@
                 </div>
             </div>
 
+            <!-- Match view actions. Manage Team is the only button kept in
+                 the match view itself — every other control (Pause / Speed /
+                 Mute / Debug) lives in the top hamburger dropdown so it's
+                 accessible from anywhere without crowding the match HUD. -->
             <div class="buttons">
-                <div class="speed-controls" id="speedControls">
-                    <button class="btn-secondary speed-btn" data-speed="slow">🐢 Slow</button>
-                    <button class="btn-secondary speed-btn" data-speed="normal">▶️ Normal</button>
-                    <button class="btn-secondary speed-btn active" data-speed="fast">⚡ Fast</button>
-                </div>
-                <button class="btn-secondary mute-btn" id="muteBtn" title="Mute sounds" aria-label="Mute sounds">🔊</button>
-                <button class="btn-secondary" id="pauseBtn">Pause</button>
                 <button class="btn-secondary" id="manageBtn" style="display: none;">Manage Team</button>
-                <button class="btn-primary" id="endBtn" style="display: none;">Match Ended</button>
             </div>
         </div>

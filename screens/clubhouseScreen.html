@@ -5,7 +5,7 @@
         <div class="screen" id="clubhouseScreen">
             <div class="clubhouse-grid">
 
-                <aside class="clubhouse-menu">
+                <aside class="clubhouse-menu" id="chMenuDrawer">
                     <div class="ch-club-head">
                         <div class="ch-crest" id="chCrestSlot"></div>
                         <div class="ch-club-text">
@@ -82,8 +82,18 @@
                         </div>
                     </div>
 
-                    <!-- (Tactics & XI is now an independent screen reached via
-                         the menu item, not an in-pane view.) -->
+                    <!-- Tactic view — clubhouse-embedded tactics/XI editor.
+                         Mounts the Tactic variant of mgmt-components, which
+                         composes: squad-depth list, next-match chip, formation
+                         pitch, formation selector, tactic panel, preset slots.
+                         No primary action — clubhouse menu handles nav. -->
+                    <div class="ch-view ch-view-tactic" data-view="tactic">
+                        <div class="ch-view-head">
+                            <span>📋</span>
+                            <span>Tactics &amp; XI</span>
+                        </div>
+                        <div class="tactic-host" style="flex: 1; min-height: 0; margin-top: 12px; overflow: hidden;"></div>
+                    </div>
 
                     <!-- Next match preview — shown when user clicks Play Next
                          Match. Filled by _renderNextMatchView(): two crests,
@@ -139,4 +149,54 @@
                 </main>
 
             </div>
+
+            <!-- Mobile-only app footer. Two halves:
+                  - Left:  "Menu" pill — toggles the bottom-sheet of menu items
+                  - Right: Back / forward nav pill (mirrors the desktop nav stack)
+                 Hidden on desktop by CSS. -->
+            <footer class="ch-mobile-footer" id="chMobileFooter">
+                <button class="ch-foot-half ch-foot-menu" id="chMobileMenuBtn" type="button"
+                        aria-label="Open menu" aria-controls="chMobileMenuSheet" aria-expanded="false">
+                    <span class="ch-foot-icon">☰</span>
+                    <span class="ch-foot-label">Menu</span>
+                </button>
+                <div class="ch-foot-half ch-foot-nav" id="chMobileNavPill" aria-label="Navigation history">
+                    <button id="mobileNavBackBtn" class="fn-btn" type="button" disabled aria-label="Back" title="Back">‹</button>
+                    <span class="fn-label" id="mobileNavLabel">—</span>
+                    <button id="mobileNavFwdBtn"  class="fn-btn" type="button" disabled aria-label="Forward" title="Forward">›</button>
+                </div>
+            </footer>
+
+            <!-- Mobile-only bottom sheet of menu items. Slides up from the
+                 footer's left half. Items mirror the .ch-menu-item buttons in
+                 the desktop rail (same data-clubhouse-action), so the same
+                 click handler wires them automatically. -->
+            <div class="ch-mobile-menu-backdrop" id="chMobileMenuBackdrop" aria-hidden="true"></div>
+            <nav class="ch-mobile-menu-sheet" id="chMobileMenuSheet" aria-hidden="true">
+                <div class="ch-mobile-menu-handle"></div>
+                <button class="ch-menu-item" data-clubhouse-action="home">
+                    <span class="ch-icon">🏟️</span><span>Stadium</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="squad">
+                    <span class="ch-icon">👥</span><span>Squad</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="tactics">
+                    <span class="ch-icon">📋</span><span>Tactics &amp; XI</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="league">
+                    <span class="ch-icon">🏆</span><span>League Table</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="fixtures">
+                    <span class="ch-icon">📅</span><span>Fixtures</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="play">
+                    <span class="ch-icon">⚽</span><span>Play Next Match</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="history">
+                    <span class="ch-icon">📜</span><span>Match History</span>
+                </button>
+                <button class="ch-menu-item" data-clubhouse-action="office">
+                    <span class="ch-icon">🪑</span><span>Manager's Office</span>
+                </button>
+            </nav>
         </div>

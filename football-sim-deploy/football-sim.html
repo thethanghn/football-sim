@@ -646,15 +646,25 @@
         .morale-arrow .morale-arrow-svg {
             filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.6));
         }
+        /* Morale arrow — floating circular badge at top-LEFT of a pitch slot,
+           mirroring the overall-rating badge at top-right. The background is
+           tinted to the morale tier (set inline via _moraleColor) so the
+           rising/falling form is visible at a glance from across the pitch. */
         .fm-morale-arrow {
             position: absolute;
-            top: -9px; right: -3px;
+            top: -7px; left: -7px;
+            width: 22px; height: 22px;
+            display: inline-flex; align-items: center; justify-content: center;
             line-height: 0;
+            background: #FFCC00;                /* fallback — overridden inline per-tier */
+            border: 1.5px solid rgba(0,0,0,0.55);
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.6);
             pointer-events: none;
             z-index: 3;
         }
         .fm-morale-arrow .morale-arrow-svg {
-            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.8));
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,0.55));
         }
 
         /* Player Detail form line — sits below age/height */
@@ -671,23 +681,26 @@
             filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7));
         }
 
-        /* Compact stamina bar — used in bench player items and formation-pitch slots */
+        /* Stamina bar — used in bench player items and formation-pitch slots.
+           Thick enough to read at a glance during a live match. */
         .stamina-bar {
             width: 100%;
-            height: 3px;
-            background: rgba(0,0,0,0.55);
-            border: 1px solid rgba(255,255,255,0.18);
-            border-radius: 2px;
+            height: 7px;
+            background: rgba(0,0,0,0.65);
+            border: 1px solid rgba(255,255,255,0.28);
+            border-radius: 3px;
             overflow: hidden;
-            margin-top: 3px;
+            margin-top: 4px;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.35);
         }
         .stamina-bar-fill {
             height: 100%;
-            border-radius: 1px;
+            border-radius: 2px;
             transition: width 0.35s ease, background 0.35s ease;
         }
-        /* In the formation-pitch slot, narrow the bar so it sits cleanly under the meta line */
-        .fm-player-slot .stamina-bar { width: 88%; margin: 2px auto 0; }
+        /* In the formation-pitch slot, give the bar a bit more breathing room
+           and keep it the full width of the card for visibility. */
+        .fm-player-slot .stamina-bar { width: 92%; margin: 3px auto 0; height: 6px; }
 
         .category-header {
             padding: 3px 10px;
@@ -858,6 +871,31 @@
             display: block; font-size: 7px; color: rgba(255,255,255,0.58); line-height: 1.2;
         }
         .fm-player-slot.selected .fm-player-meta { color: rgba(255,215,0,0.75); }
+        /* Bold primary (natural) position — visually anchors which slot the
+           player was trained for. Sits inside .fm-player-meta but also re-used
+           in other position-display contexts (squad list, detail card). */
+        .pos-primary {
+            color: #FFD700; font-weight: 800;
+        }
+        /* Floating overall badge — top-right of player card, big enough to
+           read at a glance on the pitch. Color comes from `_overallColor`
+           and is applied inline so every tier (gold/silver/etc.) renders. */
+        .fm-player-ovr-badge {
+            position: absolute;
+            top: -7px; right: -7px;
+            min-width: 22px; height: 22px;
+            padding: 0 4px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: 900; letter-spacing: 0.4px;
+            color: #fff;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.6);
+            background: #FFD700;          /* fallback — overridden inline per-tier */
+            border: 1.5px solid rgba(0,0,0,0.55);
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+            z-index: 3;
+            pointer-events: none;
+        }
         .fm-formation-label {
             position: absolute; bottom: 4px; right: 6px;
             font-size: 10px; font-weight: 700;
@@ -1008,7 +1046,7 @@
         }
 
         /* ── Player Detail Panel ─── */
-        #mobilePlayerDetail { display: none; }
+        .mobile-player-detail { display: none; }
 
         .player-detail-panel {
             background: var(--c-bg-2);
@@ -1427,35 +1465,190 @@
 
             h1 { font-size: 14px; margin-bottom: 8px; letter-spacing: 2px; }
 
-            /* ── Management ── */
+            /* ── Management ── Page scrolls naturally (height: auto + the document
+               scrolls) so the primary action at the bottom of the settings pane
+               is always reachable. The inline style="height:100%;overflow:hidden"
+               on #managementScreen gets overridden via !important. */
             #managementScreen {
                 padding: 8px !important;
-                height: 100dvh !important;
-                overflow-y: auto !important;
+                height: auto !important;
+                min-height: 100dvh !important;
+                overflow: visible !important;
+                /* iOS safe-area + breathing room so the button isn't under any UI chrome */
+                padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
             }
             #managementScreen > div:first-child { margin-bottom: 8px !important; gap: 8px !important; }
             #managementTitle { font-size: 13px !important; letter-spacing: 1px !important; }
 
-            #mgmtMainGrid {
+            .match-mgmt-host, .tactic-host {
+                /* host had min-height: 0 + overflow: hidden inline — release both so
+                   the inner panel can grow with its content and the document scrolls. */
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+            }
+            .mgmt-panel {
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .mgmt-main-grid {
                 grid-template-columns: 1fr !important;
                 grid-auto-rows: auto !important;
                 overflow: visible !important;
                 min-height: 0; gap: 8px !important;
             }
-            #mgmtMainGrid > .squad-section { max-height: 32vh; }
-            #mgmtRightStack {
+            .mgmt-main-grid > .squad-section { max-height: 32vh; }
+            .mgmt-right-stack {
                 display: flex !important;
                 flex-direction: column !important;
                 gap: 8px !important;
                 overflow: visible !important;
             }
-            #mgmtRightStack > .squad-section { max-height: 50vh; }
-            #mgmtSettingsPane { overflow-y: visible !important; }
+            /* Pitch section: drop the viewport cap and let the pitch size by
+               aspect ratio so the entire formation is visible. overflow:visible
+               keeps player slots near the goal lines from being clipped. */
+            .mgmt-right-stack > .squad-section[data-section="pitch"] {
+                max-height: none !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .fm-pitch {
+                aspect-ratio: 3 / 4;
+                min-height: 360px !important;
+                flex: none !important;
+                overflow: visible !important;
+            }
+            .mgmt-settings-pane { overflow-y: visible !important; }
 
-            #instructionPanel  { display: none !important; }
-            #mobilePlayerDetail { display: none !important; }
+            /* Tactic panel stays visible on mobile — the user needs it to
+               adjust mentality / pressing / etc. during a match. Trim the
+               tactic-row label/options so it fits a narrow viewport. */
+            .tactic-panel .instruction-title { font-size: 11px; padding: 6px 8px; }
+            .tactic-panel .tactic-row        { gap: 6px; padding: 4px 6px; }
+            .tactic-panel .tactic-label      { font-size: 10px; }
+            .tactic-panel .tactic-btn        { padding: 5px 6px; font-size: 10px; min-height: 28px; }
+
+            .mobile-player-detail { display: none !important; }
             .player-detail-overlay { padding: 10px; }
 
+            /* ── Clubhouse mobile app footer ────────────────────────────────
+               Desktop hides the footer + sheet and keeps the 2-column rail.
+               Mobile hides the rail entirely and surfaces a fixed bottom
+               footer + slide-up menu sheet. */
+            .clubhouse-grid {
+                grid-template-columns: 1fr !important;
+            }
+            .clubhouse-menu { display: none !important; }
+            .clubhouse-stage {
+                min-height: calc(100dvh - 44px);
+                /* Leave room above the fixed footer so nothing is hidden
+                   underneath when the page scrolls to the bottom. */
+                padding-bottom: calc(56px + env(safe-area-inset-bottom)) !important;
+            }
+            .ch-mobile-footer { display: flex !important; }
+            .ch-mobile-menu-sheet.is-open,
+            .ch-mobile-menu-backdrop.is-open { display: flex !important; }
+        }
+
+        /* Mobile footer + bottom-sheet menu. Hidden on desktop; the @media
+           block above flips them on for narrow viewports. */
+        .ch-mobile-footer {
+            display: none;
+            position: fixed;
+            left: 0; right: 0; bottom: 0;
+            z-index: 95;
+            height: 56px;
+            background: rgba(20,20,28,0.96);
+            border-top: 1px solid rgba(255,215,0,0.35);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding-bottom: env(safe-area-inset-bottom);
+            font-family: Arial, sans-serif;
+        }
+        .ch-foot-half {
+            flex: 1; min-width: 0;
+            display: flex; align-items: center; justify-content: center;
+            color: #eee;
+        }
+        .ch-foot-half + .ch-foot-half {
+            border-left: 1px solid rgba(255,255,255,0.08);
+        }
+        .ch-foot-menu {
+            background: transparent; border: none; cursor: pointer;
+            font-family: inherit;
+            gap: 8px;
+            padding: 0 12px;
+            color: #FFD700; font-weight: 700; letter-spacing: 0.4px;
+        }
+        .ch-foot-icon { font-size: 20px; line-height: 1; }
+        .ch-foot-label { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+        .ch-foot-menu:active { background: rgba(255,215,0,0.10); }
+        .ch-foot-nav {
+            display: grid;
+            grid-template-columns: 36px 1fr 36px;
+            align-items: center;
+            gap: 6px;
+            padding: 0 12px;
+        }
+        .ch-foot-nav .fn-btn {
+            background: transparent;
+            border: 1px solid rgba(255,215,0,0.35);
+            color: #FFD700;
+            width: 36px; height: 32px;
+            border-radius: 4px;
+            font-size: 20px; line-height: 1; font-weight: 800;
+            cursor: pointer; padding: 0;
+            font-family: inherit;
+        }
+        .ch-foot-nav .fn-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+        .ch-foot-nav .fn-label {
+            color: #ccc; font-size: 11px; text-align: center;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        .ch-mobile-menu-backdrop {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 96;
+        }
+        .ch-mobile-menu-sheet {
+            display: none;
+            flex-direction: column;
+            position: fixed;
+            left: 0; right: 0;
+            /* Anchored just above the footer so it visually pops out of it. */
+            bottom: calc(56px + env(safe-area-inset-bottom));
+            z-index: 97;
+            max-height: 70dvh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            background: rgba(20,20,28,0.98);
+            border-top: 1px solid rgba(255,215,0,0.35);
+            box-shadow: 0 -8px 24px rgba(0,0,0,0.55);
+            padding: 6px 0 12px;
+        }
+        .ch-mobile-menu-handle {
+            width: 38px; height: 4px;
+            background: rgba(255,255,255,0.25);
+            border-radius: 2px;
+            margin: 6px auto 8px;
+            flex-shrink: 0;
+        }
+        /* Reuse the existing .ch-menu-item styles, but bump tap target size
+           since these are finger-touched on mobile. */
+        .ch-mobile-menu-sheet .ch-menu-item {
+            padding: 14px 18px;
+            font-size: 14px;
+            gap: 12px;
+        }
+        .ch-mobile-menu-sheet .ch-menu-item .ch-icon { font-size: 18px; }
+
+        /* Tail of the mobile media block (re-opened because the structural
+           edit above closed the original @media early). Houses the
+           viewport-specific shrinks for player rows, match HUD, result, and
+           attribute bars. */
+        @media (max-width: 640px) {
             .player-item { min-height: 40px; padding: 4px 6px; }
             .player-item svg { width: 30px !important; height: 30px !important; }
             .player-name  { font-size: 10px; }
@@ -1499,7 +1692,13 @@
         /* ═══════════════════════════════════════════════════════
            TOP MENU BAR — fixed floating bar with hamburger
         ════════════════════════════════════════════════════════ */
-        body { padding-top: 44px; }   /* clear the fixed bar */
+        /* Clear the fixed top bar so screen content sits below it. !important
+           so any later/earlier shorthand `padding: 0` rule can't accidentally
+           collapse the top clearance. env(safe-area-inset-top) accounts for
+           the iOS notch — the bar itself doesn't extend behind the notch, so
+           we shift body down by the same amount. */
+        body { padding-top: calc(44px + env(safe-area-inset-top)) !important; }
+        .top-menu-bar { top: env(safe-area-inset-top); }
         .top-menu-bar {
             position: fixed;
             top: 0; left: 0; right: 0;
@@ -1940,6 +2139,38 @@
         .league-row .lp-name { text-align: left; }
         .league-row .lp-num { text-align: center; }
 
+        /* ── Top scorers / top assists tables (under the league standings) ── */
+        .ch-stat-table {
+            background: #0e0e0e; border: 1px solid #333; border-radius: 6px;
+            margin-top: 14px; overflow: hidden;
+        }
+        .ch-stat-head {
+            background: rgba(255,215,0,0.10); color: #FFD700;
+            padding: 8px 14px; font-size: 12px; font-weight: 800;
+            text-transform: uppercase; letter-spacing: 0.6px;
+            border-bottom: 1px solid rgba(255,215,0,0.20);
+        }
+        .ch-stat-row {
+            display: grid;
+            grid-template-columns: 28px 1fr 1fr 36px;
+            gap: 8px; align-items: center;
+            padding: 7px 12px; font-size: 12px; color: #ddd;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .ch-stat-row.header {
+            background: rgba(255,215,0,0.06); color: #FFD700;
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+            font-weight: 700;
+            border-top: none;
+        }
+        .ch-stat-row.user-club {
+            background: rgba(255,215,0,0.10); color: #FFD700; font-weight: 700;
+        }
+        .ch-stat-row .cs-num  { text-align: center; }
+        .ch-stat-row .cs-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ch-stat-row .cs-club { text-align: left; color: #aaa; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ch-stat-row.user-club .cs-club { color: rgba(255,215,0,0.7); }
+
         /* ═══════════════════════════════════════════════════════
            CLUBHOUSE SCREEN
         ════════════════════════════════════════════════════════ */
@@ -1982,7 +2213,13 @@
             position: relative;
             background: linear-gradient(180deg, #0a1428 0%, #1c3960 50%, #0e2a4a 100%);
             padding: 0;
-            overflow: hidden;
+            /* Right pane scrolls vertically when a view's content exceeds the
+               viewport. Views with their own inner scroller (.ch-view-body,
+               mgmt-panel) stay viewport-bound and their internal scroll wins;
+               views without one (e.g. tall result/banner content) fall back
+               to this parent scroll instead of clipping. */
+            overflow-y: auto;
+            overflow-x: hidden;
             display: flex; align-items: stretch; justify-content: stretch;
         }
         .ch-view {
@@ -2179,27 +2416,18 @@
             background: rgba(255,215,0,0.25); color: #FFD700;
         }
 
-        /* Tactics view — host for the relocated management UI. */
-        .ch-view-tactics {
-            padding: 14px 18px 18px;
+        /* Tactic view (clubhouse-embedded mgmt panel). Same .mgmt-panel as
+           the Match Management screen, mounted via mgmt-components.js. */
+        .ch-view-tactic {
             flex-direction: column;
+            background: rgba(10, 12, 20, 0.65);
+            padding: 18px 24px;
             overflow: hidden;
         }
-        /* When the management content is reparented under #chTacticsHost its
-           own outer wrapper is gone, so the inner grid needs the right height
-           context to scroll. */
-        #chTacticsHost {
-            flex: 1; min-height: 0;
+        /* Each panel host fills its parent so the inner grid can scroll. */
+        .match-mgmt-host, .tactic-host {
             display: flex; flex-direction: column;
-            overflow: hidden;
         }
-        /* Tighten the relocated management title for the slimmer pane */
-        #chTacticsHost #managementTitle {
-            font-size: 16px !important;
-            letter-spacing: 1.6px !important;
-        }
-        #chTacticsHost #managementCrest svg { width: 38px !important; height: 46px !important; }
-        #chTacticsHost > div:first-child { margin-bottom: 10px !important; }
 
         /* ── Squad view (clubhouse right pane) ────────────────────────── */
         .ch-view-squad { padding: 18px 24px; flex-direction: column; }
@@ -2371,13 +2599,11 @@
         .ovr-50 { background: rgba(250,204,21,0.22); color: #FACC15; }
         .ovr-40 { background: rgba(239,68,68,0.22);  color: #EF4444; }
 
-        /* ── Floating bottom nav (back / forward) ─────────────────────── */
-        /* Back / Forward pill inside the clubhouse left menu (replaces the
-           previous body-pinned floating nav). The menu uses flex column so
-           we let this element auto-margin to the bottom. */
+        /* ── Back / Forward nav pill ──────────────────────────────────── */
+        /* Sits directly below the last menu item rather than being pinned
+           to the bottom of the menu column. */
         .clubhouse-menu { display: flex; flex-direction: column; }
         .ch-menu-nav {
-            margin-top: auto;                  /* push to the bottom */
             display: grid;
             grid-template-columns: 32px 1fr 32px;
             align-items: center;
@@ -2422,6 +2648,12 @@
                 aria-label="Open menu" aria-expanded="false" title="Menu">☰</button>
     </div>
     <div class="top-menu-dropdown" id="topMenuDropdown" style="display:none">
+        <!-- Pause/Resume — only meaningful during a live match. Disabled when
+             no match is running; togglePause() handles both states. -->
+        <button class="top-menu-item" data-menu-action="toggle-pause" id="tmPauseBtn" disabled>
+            <span class="tm-icon">⏸</span><span class="tm-label">Pause match</span>
+            <span class="tm-state" id="tmPauseState">—</span>
+        </button>
         <button class="top-menu-item" data-menu-action="toggle-sound">
             <span class="tm-icon">🔊</span><span class="tm-label">Sound</span>
             <span class="tm-state" id="tmSoundState">On</span>
@@ -2749,9 +2981,13 @@
             </div>
         </div>
 
-        <!-- Floating context menu (shown on clicking a starting-XI slot) -->
+        <!-- Floating context menu (shown on clicking a starting-XI slot
+             OR a bench player). The Substitute action is the primary
+             touch-friendly path to swap players when HTML5 drag-and-drop
+             isn't available (i.e. on mobile browsers). -->
         <div id="playerContextMenu" class="context-menu" style="display:none;" role="menu">
             <div class="context-menu-header" id="playerContextMenuTitle">Player</div>
+            <button class="context-menu-item" data-action="substitute" type="button">🔄 Substitute</button>
             <button class="context-menu-item" data-action="details" type="button">📋 View Details</button>
             <button class="context-menu-item" data-action="instructions" type="button">⚙ Set Instructions</button>
             <button class="context-menu-item" data-action="arrow" type="button">🎯 Set Movement Arrow</button>
@@ -2803,6 +3039,7 @@
     <script src="storage.js?v=21"></script>
     <script src="screens/onboarding-data.js?v=21"></script>
     <script src="league-generator.js?v=21"></script>
+    <script src="mgmt-components.js?v=21"></script>
     <script src="game-flow.js?v=21"></script>
     <script src="zone-strength.js?v=21"></script>
     <script src="football-sim.js?v=21"></script>

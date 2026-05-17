@@ -783,6 +783,10 @@
               first: ['Virgil','Memphis','Frenkie','Cody','Donny','Davy','Matthijs','Georginio','Ryan','Teun','Donyell','Quincy','Arjen','Robin','Wesley'],
               last:  ['van Dijk','Depay','de Jong','Gakpo','van de Beek','Klaassen','de Ligt','Wijnaldum','Gravenberch','Koopmeiners','Malen','Promes','Robben','van Persie','Sneijder'] },
             { flag: '🇻🇳', name: 'Vietnam',      weight: 15, format: 'last_first',
+              // Vietnamese names are typically HỌ + TÊN ĐỆM + TÊN (last + middle + first).
+              // ~75% of players get a middle name; pool is male-leaning since these are footballers.
+              middleProb: 0.75,
+              middle: ['Văn','Đức','Hữu','Công','Quốc','Bá','Trọng','Xuân','Hoàng','Minh','Phú','Quang','Anh','Tuấn','Đình','Ngọc','Chí','Thế','Mạnh','Khánh'],
               first: ['Minh','Quang','Hùng','Tuấn','Dũng','Khoa','Nam','Đức','Long','Tùng','Hải','Anh','Phong','Bảo','Kiên','Thành','Trọng','Tiến','Công','Vũ'],
               last:  ['Nguyễn','Trần','Lê','Phạm','Hoàng','Phan','Vũ','Đặng','Bùi','Đỗ','Hồ','Ngô','Dương','Lý','Đinh'] },
             { flag: '🇸🇳', name: 'Senegal',      weight: 5,
@@ -983,7 +987,12 @@
                 // overall quality of the roster (richer clubs sign better players).
                 this.homeNation  = opts.homeNation || null;
                 this.budget      = opts.budget != null ? opts.budget : 60;  // sensible mid-tier default
-                this.players = this.generatePlayers();
+                // If a pre-built roster is provided (e.g. the league's persistent
+                // CPU club roster), use it as-is so career stats accumulate on
+                // the same player objects across matches. Otherwise generate.
+                this.players = Array.isArray(opts.players) && opts.players.length
+                    ? opts.players
+                    : this.generatePlayers();
                 this.startingXI = [];
                 this.bench = [];
                 this.onField = [];
@@ -1046,7 +1055,14 @@
                 const nation = opts.nation || pickNation();
                 const first  = nation.first[Math.floor(Math.random() * nation.first.length)];
                 const last   = nation.last [Math.floor(Math.random() * nation.last.length)];
-                const name   = nation.format === 'last_first' ? `${last} ${first}` : `${first} ${last}`;
+                // Optional middle name (currently used by Vietnam — slots in
+                // between last and first per local convention).
+                const middle = nation.middle && Math.random() < (nation.middleProb || 0)
+                    ? nation.middle[Math.floor(Math.random() * nation.middle.length)]
+                    : null;
+                const name   = nation.format === 'last_first'
+                    ? [last, middle, first].filter(Boolean).join(' ')
+                    : [first, middle, last].filter(Boolean).join(' ');
                 // Roll height first so generateAttributes can bias `heading` by
                 // it (tall players head better — see Team.generateAttributes).
                 const height = Team.randomHeight(position);
@@ -1690,14 +1706,11 @@
             setupEventListeners() {
                 try {
                     console.log('setupEventListeners: Starting');
-                    const formationBtns = document.querySelectorAll('.formation-btn');
-                    console.log('setupEventListeners: Found ' + formationBtns.length + ' formation buttons');
-                    formationBtns.forEach((btn, idx) => {
-                        console.log('setupEventListeners: Adding listener to button ' + idx + ', formation: ' + btn.dataset.formation);
-                        btn.addEventListener('click', (e) => {
-                            console.log('Formation button clicked, formation: ' + btn.dataset.formation);
-                            this.selectFormation(btn);
-                        });
+                    // Formation buttons inside .mgmt-panel are wired via the
+                    // delegated handler in _wireMgmtPanelHandlers(). Only the
+                    // legacy formationScreen still needs direct listeners.
+                    document.querySelectorAll('#formationScreen .formation-btn').forEach(btn => {
+                        btn.addEventListener('click', () => this.selectFormation(btn));
                     });
 
                     const startBtn = document.getElementById('startBtn');
@@ -1742,18 +1755,16 @@
                     const manageBtn = document.getElementById('manageBtn');
                     if (manageBtn) manageBtn.addEventListener('click', () => this.openManagement());
 
-                    const closeManageBtn = document.getElementById('closeManageBtn');
-                    if (closeManageBtn) closeManageBtn.addEventListener('click', () => this.closeManagement());
+                    // Resume Match button inside .mgmt-panel is wired via
+                    // MgmtComponents.setPrimaryAction() in renderManagementPanel.
 
                     const backToClubhouseBtn = document.getElementById('backToClubhouseBtn');
                     if (backToClubhouseBtn) backToClubhouseBtn.addEventListener('click', () => {
                         this._finalizeMatchDay();
                     });
 
-                    document.querySelectorAll('.tactic-btn').forEach(btn => {
-                        btn.addEventListener('click', () => this.setTactic(btn.dataset.tactic, btn.dataset.value));
-                    });
-
+                    // Tactic buttons inside .mgmt-panel are wired via the
+                    // delegated handler in _wireMgmtPanelHandlers().
                     document.querySelectorAll('.speed-btn').forEach(btn => {
                         btn.addEventListener('click', () => this.setMatchSpeed(btn.dataset.speed));
                     });
@@ -1762,9 +1773,17 @@
                     this.setupTopMenu();
                     // Floating bottom nav (back / forward) + nav stack init
                     this._initNavStack();
-                    // (Management content stays in #managementScreen — it's now
-                    // an independent screen reached via the Tactics & XI menu,
-                    // the kick-off step, and the in-match Manage button.)
+                    // Mount the two mgmt-components variants:
+                    //   .match-mgmt-host → Match Management layout (in-game)
+                    //   .tactic-host     → Tactic layout (clubhouse planning)
+                    // Each host owns its own .mgmt-panel scope so per-screen
+                    // state (open overlays, pending subs) stays isolated.
+                    if (typeof MgmtComponents !== 'undefined') {
+                        document.querySelectorAll('.match-mgmt-host, .tactic-host').forEach(host => {
+                            MgmtComponents.mount(host);
+                        });
+                        this._wireMgmtPanelHandlers();
+                    }
 
                     // First-run onboarding: prompt for a manager name if none saved.
                     // If a manager + league already exist, skip onboarding and land
@@ -1848,6 +1867,14 @@
                 }
                 const dbg = document.getElementById('tmDebugState');
                 if (dbg) dbg.textContent = this.debugMode ? 'On' : 'Off';
+
+                // Pause — only meaningful while a match is running. Disable
+                // (and dim the label) otherwise so it's obvious it's a no-op.
+                const pauseBtn   = document.getElementById('tmPauseBtn');
+                const pauseState = document.getElementById('tmPauseState');
+                const inMatch    = !!this.isRunning;
+                if (pauseBtn)   pauseBtn.disabled = !inMatch;
+                if (pauseState) pauseState.textContent = !inMatch ? '—' : (this.isPaused ? 'Paused' : 'Running');
             }
 
             _handleMenuAction(action) {
@@ -1872,6 +1899,13 @@
                         const idx = order.indexOf(this.matchSpeed);
                         const next = order[(idx + 1) % order.length];
                         this.setMatchSpeed(next);
+                        break;
+                    }
+                    case 'toggle-pause': {
+                        // No-op when no match is running (the button is
+                        // disabled in that state anyway).
+                        if (!this.isRunning) return;
+                        this.togglePause();
                         break;
                     }
                     case 'toggle-debug': {
@@ -2339,7 +2373,17 @@
                         clubName: userClub?.clubName || `${city.name} FC`,
                         createdAt: new Date().toISOString(),
                     });
-                    if (league) GameStorage.saveLeague(league);
+                    if (league) {
+                        // Populate every non-user club's persistent player roster
+                        // so simulated CPU-vs-CPU matches can attribute scorers
+                        // and assists for the league-wide leaderboard.
+                        if (typeof LeagueGenerator !== 'undefined') {
+                            league.forEach(c => {
+                                if (!c.isUserClub) LeagueGenerator.ensureRoster(c, nation);
+                            });
+                        }
+                        GameStorage.saveLeague(league);
+                    }
                     // Generate the round-robin fixture list + assign calendar
                     // dates starting at the nation's typical kickoff. In-game
                     // "current date" is set one week before round 1.
@@ -2453,12 +2497,21 @@
                 // Stadium illustration (built once per render to reflect kit colour)
                 this._renderStadiumSVG(this.playerTeam?.jerseyColor || '#FFD700');
 
-                // Wire menu buttons (idempotent — re-attached each render)
+                // Wire menu buttons (idempotent — re-attached each render).
+                // Picks up both the desktop rail items and the mobile bottom-sheet
+                // copies — they share class + data-clubhouse-action. Tapping any
+                // item closes the mobile sheet (no-op on desktop).
                 document.querySelectorAll('.ch-menu-item').forEach(btn => {
                     const fresh = btn.cloneNode(true);
                     btn.parentNode.replaceChild(fresh, btn);
-                    fresh.addEventListener('click', () => this._handleClubhouseAction(fresh.dataset.clubhouseAction));
+                    fresh.addEventListener('click', () => {
+                        this._closeClubhouseMenu();
+                        this._handleClubhouseAction(fresh.dataset.clubhouseAction);
+                    });
                 });
+
+                // Wire the mobile app footer (menu toggle + back/fwd nav).
+                this._wireClubhouseMobileFooter();
 
                 // Default to the stadium view + highlight the Stadium menu item.
                 // Seed the nav stack with this entry so Back goes nowhere yet
@@ -2516,18 +2569,119 @@
                 }
             }
 
-            // Opens the independent Match Management screen in one of three
-            // modes:
-            //   'tactics' — adjusting tactics from the Clubhouse (outside any
-            //               match). Primary action: Back to Clubhouse.
-            //   'kickoff' — final XI / tactic review right before kick-off.
-            //               Primary action: Kick Off Match.
-            //   'inMatch' — opened mid-match via the Manage button (match is
-            //               paused). Primary action: Resume Match. Clubhouse
-            //               access is blocked while in this mode.
+            // Mobile-only: wires the bottom app footer.
+            //   - Left half (#chMobileMenuBtn) toggles the bottom-sheet menu
+            //   - Right half (#mobileNavBackBtn / #mobileNavFwdBtn) drives the
+            //     same _navBack/_navForward as the desktop nav pill
+            //   - Backdrop tap closes the sheet
+            // Listeners are re-attached via clone to stay idempotent across
+            // repeated _enterClubhouse() calls.
+            _wireClubhouseMobileFooter() {
+                const menuBtn  = document.getElementById('chMobileMenuBtn');
+                const sheet    = document.getElementById('chMobileMenuSheet');
+                const backdrop = document.getElementById('chMobileMenuBackdrop');
+                if (menuBtn && sheet && backdrop) {
+                    const freshMenu = menuBtn.cloneNode(true);
+                    menuBtn.parentNode.replaceChild(freshMenu, menuBtn);
+                    freshMenu.addEventListener('click', () => {
+                        const open = !sheet.classList.contains('is-open');
+                        sheet.classList.toggle('is-open', open);
+                        backdrop.classList.toggle('is-open', open);
+                        freshMenu.setAttribute('aria-expanded', String(open));
+                        sheet.setAttribute('aria-hidden', String(!open));
+                    });
+                    const freshBackdrop = backdrop.cloneNode(true);
+                    backdrop.parentNode.replaceChild(freshBackdrop, backdrop);
+                    freshBackdrop.addEventListener('click', () => this._closeClubhouseMenu());
+                }
+
+                // Mobile nav buttons — re-clone to avoid stacking listeners.
+                const back = document.getElementById('mobileNavBackBtn');
+                const fwd  = document.getElementById('mobileNavFwdBtn');
+                if (back) {
+                    const freshBack = back.cloneNode(true);
+                    back.parentNode.replaceChild(freshBack, back);
+                    freshBack.addEventListener('click', () => this._navBack());
+                }
+                if (fwd) {
+                    const freshFwd = fwd.cloneNode(true);
+                    fwd.parentNode.replaceChild(freshFwd, fwd);
+                    freshFwd.addEventListener('click', () => this._navForward());
+                }
+                // Sync state on (re)wire so disabled flags + label match the stack.
+                this._refreshNavButtons();
+            }
+
+            _closeClubhouseMenu() {
+                const sheet    = document.getElementById('chMobileMenuSheet');
+                const backdrop = document.getElementById('chMobileMenuBackdrop');
+                const menuBtn  = document.getElementById('chMobileMenuBtn');
+                sheet?.classList.remove('is-open');
+                backdrop?.classList.remove('is-open');
+                sheet?.setAttribute('aria-hidden', 'true');
+                menuBtn?.setAttribute('aria-expanded', 'false');
+            }
+
+            // Wire delegated click handlers for every mounted .mgmt-panel.
+            // Formation + tactic buttons are inside each panel scope, so we
+            // bind once at boot per panel root via event delegation. Keeps
+            // the two scopes (managementScreen / clubhouse Tactic) isolated.
+            _wireMgmtPanelHandlers() {
+                document.querySelectorAll('.mgmt-panel').forEach(scope => {
+                    scope.addEventListener('click', (e) => {
+                        const fb = e.target.closest('.formation-btn');
+                        if (fb) {
+                            // Existing selectFormation expects a button element.
+                            // It reads dataset.formation — same shape as before.
+                            this.selectFormation(fb);
+                            return;
+                        }
+                        const tb = e.target.closest('.tactic-btn');
+                        if (tb && tb.dataset.tactic) {
+                            this.setTactic(tb.dataset.tactic, tb.dataset.value);
+                            return;
+                        }
+                        const closeX = e.target.closest('.player-detail-close-btn');
+                        if (closeX) {
+                            const overlay = scope.querySelector('.player-detail-overlay');
+                            if (overlay) overlay.style.display = 'none';
+                            return;
+                        }
+                    });
+                });
+            }
+
+            // Returns the active .mgmt-panel scope — the one inside whichever
+            // host is currently visible. Used by render functions so they
+            // operate on the right DOM tree.
+            _getActiveMgmtScope() {
+                // Match Management screen takes priority while visible.
+                const mgmtScreen = document.getElementById('managementScreen');
+                if (mgmtScreen?.classList.contains('active')) {
+                    return mgmtScreen.querySelector('.mgmt-panel');
+                }
+                // Otherwise: whichever ch-view-tactic is active in clubhouse.
+                const tacticView = document.querySelector('.ch-view-tactic.active');
+                if (tacticView) return tacticView.querySelector('.mgmt-panel');
+                // Fallback: first panel on the page.
+                return document.querySelector('.mgmt-panel');
+            }
+
+            // Open the management UI. Modes:
+            //   'tactics' — embedded in the Clubhouse Tactic view (auto-saves
+            //               on Back to Clubhouse via the menu).
+            //   'kickoff' — Match Management screen, primary action Kick Off.
+            //   'inMatch' — Match Management screen, primary action Resume.
+            //               Clubhouse access is blocked while in this mode.
             _openTacticsView(mode = 'tactics') {
                 this._mgmtMode = mode;
-                this.switchScreen('managementScreen');
+                if (mode === 'tactics') {
+                    // Embedded clubhouse view — no separate screen switch.
+                    this.switchScreen('clubhouseScreen');
+                    this._setClubhouseView('tactic');
+                } else {
+                    this.switchScreen('managementScreen');
+                }
                 this.renderManagementPanel();
             }
 
@@ -2558,6 +2712,36 @@
                 const ordered = (typeof LeagueGenerator !== 'undefined')
                     ? LeagueGenerator.sortTable(league)
                     : league.slice();
+
+                const { topScorers, topAssists } = this._aggregateTopScorersAndAssists();
+                const userClubName = ordered.find(c => c.isUserClub)?.clubName;
+
+                const statTable = (title, rows, statLabel) => {
+                    if (!rows.length) {
+                        return `<div class="ch-stat-table">
+                            <div class="ch-stat-head">${title}</div>
+                            <div class="tm-hist-empty" style="padding:12px;">No data yet — play a match first.</div>
+                        </div>`;
+                    }
+                    return `<div class="ch-stat-table">
+                        <div class="ch-stat-head">${title}</div>
+                        <div class="ch-stat-row header">
+                            <span class="cs-num">#</span>
+                            <span class="cs-name">Player</span>
+                            <span class="cs-club">Club</span>
+                            <span class="cs-num">${statLabel}</span>
+                        </div>
+                        ${rows.map((r, i) => `
+                            <div class="ch-stat-row ${r.clubName === userClubName ? 'user-club' : ''}">
+                                <span class="cs-num">${i + 1}</span>
+                                <span class="cs-name">${r.name}</span>
+                                <span class="cs-club">${r.clubName}</span>
+                                <span class="cs-num">${r.value}</span>
+                            </div>
+                        `).join('')}
+                    </div>`;
+                };
+
                 body.innerHTML = `
                     <div class="league-preview" style="max-height:none;">
                         <div class="league-row header">
@@ -2579,7 +2763,70 @@
                             </div>
                         `).join('')}
                     </div>
+
+                    ${statTable('🥇 Top Scorers',  topScorers, 'G')}
+                    ${statTable('🎯 Top Assists', topAssists, 'A')}
                 `;
+            }
+
+            // Aggregates per-player career goals + assists across every club
+            // in the league. Reads from each club's persistent `players[]`
+            // roster (populated by LeagueGenerator.ensureRoster at onboarding
+            // or lazily on first need). User's club roster is read from the
+            // saved playerTeam instead, since that's where the user's roster
+            // edits + match increments land.
+            // Returns sorted top-N lists ({ name, clubName, value }).
+            _aggregateTopScorersAndAssists({ limit = 10 } = {}) {
+                if (typeof GameStorage === 'undefined') return { topScorers: [], topAssists: [] };
+                const league      = GameStorage.loadLeague?.() || [];
+                const userSaved   = GameStorage.loadPlayerTeam?.();
+                const userClub    = league.find(c => c.isUserClub);
+                const userClubName= userClub?.clubName;
+
+                const goals   = new Map();
+                const assists = new Map();
+                const bump = (map, name, clubName, n) => {
+                    if (!name || !n) return;
+                    const key = `${clubName}::${name}`;
+                    const cur = map.get(key) || { name, clubName, value: 0 };
+                    cur.value += n;
+                    map.set(key, cur);
+                };
+
+                league.forEach(club => {
+                    // User's club uses the saved playerTeam roster as the source
+                    // of truth — that's where the live match writes career stats.
+                    const roster = club.isUserClub
+                        ? (userSaved?.players || [])
+                        : (club.players || []);
+                    roster.forEach(p => {
+                        bump(goals,   p.name, club.clubName, p.goals   || 0);
+                        bump(assists, p.name, club.clubName, p.assists || 0);
+                    });
+                });
+
+                // Fallback for very fresh saves where no league/rosters exist yet
+                // — fall back to the previous history-snapshot aggregation so the
+                // first match's data shows up too.
+                if (goals.size === 0 && assists.size === 0) {
+                    const history = GameStorage.loadHistory?.() || [];
+                    history.forEach(m => {
+                        [m.playerLineup, m.cpuLineup].forEach(snap => {
+                            if (!snap?.lineup) return;
+                            snap.lineup.forEach(p => {
+                                bump(goals,   p.name, snap.clubName, p.goals   || 0);
+                                bump(assists, p.name, snap.clubName, p.assists || 0);
+                            });
+                        });
+                    });
+                }
+
+                const sortDesc = (a, b) => b.value - a.value || a.name.localeCompare(b.name);
+                void userClubName; // referenced via map keys; preserved for future filtering
+                return {
+                    topScorers: [...goals.values()].sort(sortDesc).slice(0, limit),
+                    topAssists: [...assists.values()].sort(sortDesc).slice(0, limit),
+                };
             }
 
             // Renders the round-robin fixture list inline in the clubhouse right pane,
@@ -2812,9 +3059,16 @@
                         userMatch.home, userMatch.away, userMatch.homeScore, userMatch.awayScore);
                 }
 
-                // (2) Simulate every other unplayed match in this round
+                // (2) Simulate every other unplayed match in this round —
+                // simulateMatch picks scorers/assisters from each club's
+                // persistent roster, so the league-wide top scorer / assist
+                // tables get attribution for these games too. Pass `nation` so
+                // older saves without rosters get a lazy-seeded one.
+                const mgr = (typeof GameStorage !== 'undefined') ? GameStorage.loadManager() : null;
+                const nation = (mgr?.nation && typeof SEA_NATIONS !== 'undefined')
+                    ? SEA_NATIONS.find(n => n.code === mgr.nation) : null;
                 LeagueGenerator.simulateRound(round, league,
-                    (m) => m === userMatch);
+                    (m) => m === userMatch, { nation });
 
                 // (3) Persist + remember the round just played so the Today's
                 //     Fixture view can render it.
@@ -3172,15 +3426,24 @@
             }
 
             _refreshNavButtons() {
-                const back = document.getElementById('navBackBtn');
-                const fwd  = document.getElementById('navFwdBtn');
-                const lbl  = document.getElementById('navLabel');
-                if (back) back.disabled = !this._navStack || this._navIdx <= 0;
-                if (fwd)  fwd .disabled = !this._navStack || this._navIdx >= this._navStack.length - 1;
-                if (lbl) {
-                    const entry = this._navStack?.[this._navIdx];
-                    lbl.textContent = entry?.label || '—';
-                }
+                const backDisabled = !this._navStack || this._navIdx <= 0;
+                const fwdDisabled  = !this._navStack || this._navIdx >= this._navStack.length - 1;
+                const label = this._navStack?.[this._navIdx]?.label || '—';
+
+                // Desktop rail nav pill + mobile footer nav pill share the same
+                // semantics; keep them in lockstep.
+                ['navBackBtn', 'mobileNavBackBtn'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.disabled = backDisabled;
+                });
+                ['navFwdBtn', 'mobileNavFwdBtn'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.disabled = fwdDisabled;
+                });
+                ['navLabel', 'mobileNavLabel'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = label;
+                });
             }
 
             // Renders a stylised football stadium into the #chStadium slot —
@@ -3380,6 +3643,23 @@
                 player.stats[key] = (player.stats[key] || 0) + n;
             }
 
+            // After a match ends, fold each player's per-match goalsScored /
+            // assistsGiven into their career goals / assists counters.
+            // Necessary because the in-match increments at goalEvent target the
+            // shallow-copied onField player (`{...p, isOnField:true}`), so the
+            // canonical roster's top-level p.goals / p.assists don't update
+            // automatically. p.stats is shared by reference (see setupSquad),
+            // so reading `p.stats.goalsScored` here gets the per-match total.
+            _mergeMatchStatsIntoCareer(teamObj) {
+                if (!teamObj?.players) return;
+                teamObj.players.forEach(p => {
+                    const g = p.stats?.goalsScored  || 0;
+                    const a = p.stats?.assistsGiven || 0;
+                    if (g) p.goals   = (p.goals   || 0) + g;
+                    if (a) p.assists = (p.assists || 0) + a;
+                });
+            }
+
             _statSubOn(player) {
                 if (!player?.stats) return;
                 player.stats.subbedOnMinute = this.rules.getMatchMinute(this.timeRemaining);
@@ -3471,6 +3751,19 @@
             // E.g. ST with secondaries [CF, CAM] → "ST/CF/CAM". Falls back to plain natural
             // (or current position) when no secondaries exist.
             _positionDisplay(player) {
+                const natural = player.naturalPosition || player.position;
+                const secs = player.secondaryPositions || [];
+                // Natural position is wrapped in .pos-primary so it stands out
+                // from the secondaries. Returns HTML — callers should render
+                // via template literals into innerHTML. For attribute uses
+                // (e.g. title=""), use _positionDisplayPlain instead.
+                const primary = `<span class="pos-primary">${natural}</span>`;
+                return secs.length ? `${primary}/${secs.join('/')}` : primary;
+            }
+
+            // Plain-text version of the position list — used wherever HTML
+            // markup would leak as visible text (e.g. title="" tooltips).
+            _positionDisplayPlain(player) {
                 const natural = player.naturalPosition || player.position;
                 const secs = player.secondaryPositions || [];
                 return secs.length ? `${natural}/${secs.join('/')}` : natural;
@@ -3580,8 +3873,9 @@
             }
 
             showPlayerDetail(player, opts = {}) {
-                const overlay = document.getElementById('playerDetailOverlay');
-                const content = document.getElementById('playerDetailOverlayContent');
+                const scope = this._mgmtScope || this._getActiveMgmtScope();
+                const overlay = scope?.querySelector('.player-detail-overlay');
+                const content = scope?.querySelector('.player-detail-overlay-content');
                 if (!overlay || !content) return;
 
                 const avatar   = AvatarGenerator.createSVG(player.avatar, 80, this._jerseyFor(player, this.playerTeam?.jerseyColor));
@@ -4059,8 +4353,18 @@
                         }
                     }
                     if (club) {
+                        // Lazy-seed the roster for clubs that pre-date the league
+                        // roster feature (older saves) so this match contributes
+                        // its CPU's scorers to the league-wide leaderboard.
+                        if (typeof LeagueGenerator !== 'undefined' && homeNation) {
+                            LeagueGenerator.ensureRoster(club, homeNation);
+                        }
                         const cpu = new Team('CPU', this.playerTeam.jerseyColor, null, {
                             homeNation, budget: club.budget,
+                            // Hand Team the persistent league roster so stats
+                            // mutations during the match land on the same player
+                            // objects the leaderboard reads from.
+                            players: Array.isArray(club.players) ? club.players : undefined,
                         });
                         // Overwrite the auto-rolled identity with the league club's,
                         // and rebuild the crest from its seed so visuals stay stable.
@@ -4621,25 +4925,31 @@
                 if (Math.random() < 0.012)                      { this.ownGoalEvent(team);                  return; }
                 if (Math.random() < 0.020)                      { this.goalDisallowedEvent(team); restart(opp); return; }     // defender's restart
 
+                // A "save" branch is still a shot — increment BOTH shots and
+                // shotsOnTarget. Inlined helper keeps the branch tables compact.
+                const countSave = () => {
+                    if (team === 'player') { this.stats.playerShots++; this.stats.playerShotsOnTarget++; }
+                    else                   { this.stats.cpuShots++;    this.stats.cpuShotsOnTarget++;    }
+                };
                 if (attackScore > 0.62) {
                     if (r2 < 0.28)        this.goalEvent(team);                                  // → kickoff
                     else if (r2 < 0.55)   this.chanceEvent(team);                                // → ambiguous (midfield battle)
                     else if (r2 < 0.68) { this.missedChanceEvent(team); restart(opp); }          // defender's goal kick
                     else if (r2 < 0.78) { this.barEvent(team);          restart(opp); }          // rebound usually cleared
                     else if (r2 < 0.86) { this.cornerEvent(team);       restart(team); }         // attacker retains via corner
-                    else                { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
+                    else                { countSave(); this.saveEvent(); restart(opp); }
                 } else if (attackScore > 0.48) {
                     if (r2 < 0.12)        this.goalEvent(team);
                     else if (r2 < 0.32)   this.chanceEvent(team);
                     else if (r2 < 0.50) { this.missedChanceEvent(team); restart(opp); }
-                    else if (r2 < 0.64) { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
+                    else if (r2 < 0.64) { countSave(); this.saveEvent(); restart(opp); }
                     else if (r2 < 0.76) { this.barEvent(team);          restart(opp); }
                     else if (r2 < 0.88) { this.cornerEvent(team);       restart(team); }
                     else                { this.tackleEvent(opp);        restart(opp); }          // defender wins the ball
                 } else {
                     if (r2 < 0.05)        this.goalEvent(team);
                     else if (r2 < 0.16)   this.chanceEvent(team);
-                    else if (r2 < 0.38) { if (team==='player') this.stats.playerShotsOnTarget++; else this.stats.cpuShotsOnTarget++; this.saveEvent(); restart(opp); }
+                    else if (r2 < 0.38) { countSave(); this.saveEvent(); restart(opp); }
                     else if (r2 < 0.58) { this.missedChanceEvent(team); restart(opp); }
                     else if (r2 < 0.72) { this.cornerEvent(team);       restart(team); }
                     else                { this.tackleEvent(opp);        restart(opp); }
@@ -5287,10 +5597,16 @@
                     const r = Math.random();
                     const head = (headerer.heading || 60) / 100;
                     if (r < head * 0.25) {
-                        this.goalEvent(team);   // headed goal resolves via standard goal flow
+                        // Headed goal — goalEvent owns the team shot counter.
+                        this.goalEvent(team);
                     } else if (r < 0.55) {
+                        // Saved by the keeper — counts as a shot on target.
+                        if (team === 'player') { this.stats.playerShots++; this.stats.playerShotsOnTarget++; }
+                        else                   { this.stats.cpuShots++;    this.stats.cpuShotsOnTarget++;    }
                         this.addEvent(`🧤 <b class="ev-name">${headerer.name}</b>'s header is well saved!`, 'save', team === 'player' ? 'cpu' : 'player');
                     } else {
+                        // Over the bar — shot, but off target.
+                        if (team === 'player') this.stats.playerShots++; else this.stats.cpuShots++;
                         this.addEvent(`💢 <b class="ev-name">${headerer.name}</b> rises but heads it over!`, 'chance', team);
                     }
                 } else {
@@ -5522,6 +5838,69 @@
                 document.getElementById('cpuPasses').textContent = this.stats.cpuPasses;
                 document.getElementById('playerPoss').textContent = Math.round(this.stats.playerPossession);
                 document.getElementById('cpuPoss').textContent = Math.round(this.stats.cpuPossession);
+
+                // Keep the Match Management score chip in sync while the match
+                // is running. Cheap no-op when the management screen isn't open.
+                this._renderMatchMgmtScoreChip();
+            }
+
+            // Fills the live score chip in the Match Management layout. Reads
+            // playerScore/cpuScore, the match minute, and the player's sub
+            // quota. Also lists scorers in compact form when there are any.
+            // If `scope` is omitted, finds the active Match Mgmt panel itself.
+            _renderMatchMgmtScoreChip(scope) {
+                const panel = scope || document.querySelector('#managementScreen .mgmt-panel-match');
+                if (!panel) return;
+                const chip = panel.querySelector('.mm-score-chip');
+                if (!chip) return;
+
+                // Hide before kickoff (score is 0–0 and there's no minute yet)
+                // and when no CPU team is set (i.e. before a match exists).
+                if (this.isPreMatch || !this.cpuTeam) {
+                    chip.style.display = 'none';
+                    return;
+                }
+                chip.style.display = 'flex';
+
+                const playerName = this.playerTeam?.clubName || 'You';
+                const cpuName    = this.cpuTeam?.clubName    || 'CPU';
+                const minute     = this.timeRemaining != null ? this.rules.getMatchMinute(this.timeRemaining) : null;
+                const subsUsed   = this.rules?.subCount?.player ?? 0;
+                const subsTotal  = this.rules?.MAX_SUBS ?? 5;
+                const subsLeft   = Math.max(0, subsTotal - subsUsed);
+
+                chip.querySelector('.mm-score-club').textContent     = playerName;
+                chip.querySelector('.mm-score-opponent').textContent = cpuName;
+                chip.querySelector('.mm-score-value').textContent    = `${this.playerScore} – ${this.cpuScore}`;
+                chip.querySelector('.mm-score-minute').textContent   = minute != null ? `${minute}'` : '';
+
+                const subsEl = chip.querySelector('.mm-score-subs');
+                subsEl.textContent = `Subs ${subsLeft}/${subsTotal}`;
+                subsEl.style.color = subsLeft > 0 ? '#86EFAC' : '#FCA5A5';
+            }
+
+            // Fills the next-match preview chip in the Tactic layout. Uses
+            // _findNextUserFixture(). Hidden when no fixture is queued.
+            _renderTacticNextMatchChip(scope) {
+                const panel = scope || document.querySelector('.ch-view-tactic .mgmt-panel-tactic');
+                if (!panel) return;
+                const chip = panel.querySelector('.tactic-next-match-chip');
+                if (!chip) return;
+
+                const next = this._findNextUserFixture?.();
+                if (!next) {
+                    chip.style.display = 'none';
+                    return;
+                }
+                chip.style.display = 'flex';
+
+                const { date, match, userClub } = next;
+                const userIsHome = match.home === userClub.clubName;
+                const opp   = userIsHome ? match.away : match.home;
+                const venue = userIsHome ? '(H)' : '(A)';
+
+                chip.querySelector('.next-match-opponent').textContent = `vs ${opp} ${venue}`;
+                chip.querySelector('.next-match-date').textContent     = date ? this._formatDate(date) : '';
             }
 
             // Default importance tier per coarse event type. Specific call sites can override by
@@ -5594,7 +5973,12 @@
 
             togglePause() {
                 this.isPaused = !this.isPaused;
-                document.getElementById('pauseBtn').textContent = this.isPaused ? 'Resume' : 'Pause';
+                // pauseBtn was retired from the match view (Pause now lives in
+                // the header dropdown). Keep the legacy lookup tolerant so any
+                // remaining ref doesn't throw.
+                const pauseBtn = document.getElementById('pauseBtn');
+                if (pauseBtn) pauseBtn.textContent = this.isPaused ? 'Resume' : 'Pause';
+                this._refreshTopMenuState();
             }
 
             // Triple-click counter on the match clock — three clicks within 1500 ms toggles debug.
@@ -5718,7 +6102,8 @@
             }
 
             renderFormationPitch() {
-                const pitch = document.getElementById('formationPitch');
+                const scope = this._mgmtScope || this._getActiveMgmtScope();
+                const pitch = scope?.querySelector('.formation-pitch');
                 if (!pitch || !this.playerTeam) return;
 
                 const formation = this.playerFormation || '442';
@@ -5839,10 +6224,11 @@
                                 draggable="true"
                                 data-player-id="${p.id}"
                                 data-default-x="${defX}" data-default-y="${defY}">
-                            <span class="fm-morale-arrow" title="${moraleLb} form">${this._moraleArrowSVG(p.morale, 18)}</span>
+                            <span class="fm-morale-arrow" title="${moraleLb} form" style="background:${moraleCol};">${this._moraleArrowSVG(p.morale, 14)}</span>
+                            <span class="fm-player-ovr-badge" title="Overall ${ovr}" style="background:${ovrColor};">${ovr}</span>
                             <div class="fm-player-avatar">${avatarSVG}</div>
                             <span class="fm-player-name">${lastName}</span>
-                            <span class="fm-player-meta">${posHtml} · <b style="color:${ovrColor};">${ovr}</b></span>
+                            <span class="fm-player-meta">${posHtml}</span>
                             <div class="stamina-bar" title="Stamina ${stamPct}%">
                                 <div class="stamina-bar-fill" style="width:${stamPct}%;background:${stamCol};"></div>
                             </div>
@@ -5916,14 +6302,25 @@
                 // Always close any sibling popover first so only one is visible at a time
                 this._hideAllPlayerPopovers();
 
+                // Detect whether this is a starter (onField) or a bench player —
+                // bench players don't have meaningful Instructions / Arrow actions.
+                const isOnField = !!this.playerTeam?.onField?.some(p => p.id === player.id);
+
                 title.textContent = `${player.flag ? player.flag + ' ' : ''}${player.name} (${player.position})`;
 
                 menu.querySelectorAll('.context-menu-item').forEach(btn => {
+                    const action = btn.dataset.action;
+                    // Hide Instructions + Arrow when the player isn't on the pitch.
+                    if (!isOnField && (action === 'instructions' || action === 'arrow')) {
+                        btn.style.display = 'none';
+                    } else {
+                        btn.style.display = '';
+                    }
                     btn.onclick = (e) => {
                         e.stopPropagation();
-                        const action = btn.dataset.action;
                         this._hideAllPlayerPopovers();
-                        if (action === 'details')           this.showPlayerDetail(player);
+                        if      (action === 'substitute')   this.selectPlayer(player, isOnField);
+                        else if (action === 'details')      this.showPlayerDetail(player);
                         else if (action === 'instructions') this._showInstructionsPopover(player);
                         else if (action === 'arrow')        this._showArrowPopover(player);
                     };
@@ -6259,98 +6656,89 @@
             }
 
             renderManagementPanel() {
-                const crestEl = document.getElementById('managementCrest');
-                const titleEl = document.getElementById('managementTitle');
-                if (crestEl && this.playerTeam) {
-                    crestEl.innerHTML = this.playerTeam.crestSVGSm;
-                    if (titleEl) {
-                        if (this.isPreMatch) {
-                            titleEl.textContent = '⚽ PICK YOUR SQUAD ⚽';
-                        } else {
-                            // During the match, show subs-remaining alongside the club name.
-                            const used  = this.rules?.subCount?.player ?? 0;
-                            const total = this.rules?.MAX_SUBS ?? 5;
-                            const left  = Math.max(0, total - used);
-                            const minute = this.timeRemaining != null ? this.rules.getMatchMinute(this.timeRemaining) : null;
-                            const min = minute != null ? `  ·  ${minute}'` : '';
-                            const tag = `  ·  Subs ${left}/${total}`;
-                            titleEl.innerHTML = `${this.playerTeam.clubName}<span style="font-size:0.5em; color:${left > 0 ? '#86EFAC' : '#FCA5A5'}; letter-spacing:1px; margin-left:8px;">${tag}${min}</span>`;
-                        }
+                // The active panel scope (managementScreen's panel or the
+                // clubhouse Tactic view's panel). Renderers below take this
+                // as an argument so they don't depend on global IDs.
+                const scope = this._getActiveMgmtScope();
+                if (!scope) return;
+                this._mgmtScope = scope;
+
+                // Title + crest live in managementScreen's header (still by ID
+                // since there's only one instance of those). The clubhouse
+                // Tactic view has its own static "Tactics & XI" header, so we
+                // only update mgmt-screen title when we're in that scope.
+                // The score chip (mm-score-chip) carries live minute/subs/score
+                // info — title stays clean.
+                const mode = this._mgmtMode || (this.isPreMatch ? 'kickoff' : 'inMatch');
+                if (mode !== 'tactics') {
+                    const crestEl = document.getElementById('managementCrest');
+                    const titleEl = document.getElementById('managementTitle');
+                    if (crestEl && this.playerTeam) {
+                        crestEl.innerHTML = this.playerTeam.crestSVGSm;
                     }
+                    if (titleEl) {
+                        titleEl.textContent = this.isPreMatch
+                            ? '⚽ PICK YOUR SQUAD ⚽'
+                            : (this.playerTeam?.clubName || '⚽ MATCH MANAGEMENT ⚽');
+                    }
+                    this._renderMatchMgmtScoreChip(scope);
+                } else {
+                    this._renderTacticNextMatchChip(scope);
                 }
 
                 // Re-renders implicitly close any open detail overlay or floating popover.
-                const detailOverlay = document.getElementById('playerDetailOverlay');
+                const detailOverlay = scope.querySelector('.player-detail-overlay');
                 if (detailOverlay) detailOverlay.style.display = 'none';
                 this._hideAllPlayerPopovers?.();
 
-                // Toggle the primary-action button based on _mgmtMode.
-                // Three modes share this screen — see _openTacticsView().
-                const mode    = this._mgmtMode || (this.isPreMatch ? 'kickoff' : 'inMatch');
-                const formSel = document.getElementById('mgmtFormationSelector');
-                const startSec = document.getElementById('startMatchSection');
-                const subCtrl  = document.getElementById('subControls');
-                const startBtn = document.getElementById('mgmtStartBtn');
-                const closeBtn = document.getElementById('closeManageBtn');
-
-                // Formation selector is available in all three modes.
-                if (formSel) formSel.style.display = 'block';
-
-                // The Start/Kick-Off/Back container hosts the primary action
-                // for 'tactics' and 'kickoff'. The Close container hosts the
-                // primary action for 'inMatch'.
-                if (startSec) startSec.style.display = (mode === 'inMatch') ? 'none' : 'block';
-                if (subCtrl)  subCtrl.style.display  = (mode === 'inMatch') ? 'block' : 'none';
-
-                if (startBtn) {
-                    // Rewire the click handler each render so we can swap modes
-                    // without stacking listeners. onclick assignment also wipes
-                    // the original inline `onclick="window.game.startMatch()"`.
+                // Primary action button — content depends on mode. Hidden in
+                // 'tactics' since the clubhouse menu already lets you leave.
+                if (typeof MgmtComponents !== 'undefined') {
                     if (mode === 'kickoff') {
-                        startBtn.textContent = '▶ Kick Off Match';
-                        startBtn.onclick = () => this.startMatch();
-                    } else {  // 'tactics'
-                        startBtn.textContent = '← Back to Clubhouse';
-                        startBtn.onclick = () => {
-                            // Tactics tweaks made here persist via saveTactics;
-                            // re-render the clubhouse so any squad changes show.
-                            if (typeof GameStorage !== 'undefined' && this.playerTeam) {
-                                GameStorage.savePlayerTeam(this.playerTeam.serialize());
-                                GameStorage.saveTactics(this.tactics, this.playerFormation);
-                            }
-                            this._enterClubhouse();
-                        };
+                        MgmtComponents.setPrimaryAction(scope, {
+                            text: '▶ Kick Off Match',
+                            onClick: () => this.startMatch(),
+                        });
+                    } else if (mode === 'inMatch') {
+                        MgmtComponents.setPrimaryAction(scope, {
+                            text: '← Resume Match',
+                            onClick: () => this.closeManagement(),
+                        });
+                    } else {
+                        // tactics — clubhouse menu handles navigation
+                        MgmtComponents.setPrimaryAction(scope, { visible: false });
                     }
                 }
-                if (closeBtn) {
-                    closeBtn.style.display = (mode === 'inMatch') ? 'block' : 'none';
-                    if (mode === 'inMatch') closeBtn.textContent = '← Resume Match';
-                }
 
-                // Highlight selected formation button
+                // Highlight selected formation button (within this scope only).
                 if (this.playerFormation) {
-                    document.querySelectorAll('.formation-btn').forEach(b => {
+                    scope.querySelectorAll('.formation-btn').forEach(b => {
                         b.classList.toggle('selected', b.dataset.formation === this.playerFormation);
                     });
                 }
 
-                // Sync tactic button active states
-                document.querySelectorAll('.tactic-btn').forEach(b => {
+                // Sync tactic button active states (within this scope only).
+                scope.querySelectorAll('.tactic-btn').forEach(b => {
                     b.classList.toggle('active', this.tactics[b.dataset.tactic] === b.dataset.value);
                 });
 
-                // Render formation pitch (left column)
+                // Render formation pitch (right top)
                 this.renderFormationPitch();
 
                 // Render bench / player list (left column).
-                // Bench: click → details (drag is the only path to substitute).
-                const benchList = document.getElementById('benchList');
-                if (benchList) {
+                const benchList = scope.querySelector('.bench-list');
+                if (benchList && this.playerTeam) {
                     benchList.innerHTML = '';
                     this.playerTeam.bench.forEach(player => {
                         const playerEl = this.createPlayerElement(player, false);
                         playerEl.setAttribute('draggable', 'true');
-                        playerEl.addEventListener('click', () => this.showPlayerDetail(player));
+                        // Tap a bench player → context menu (Substitute / Details).
+                        // This is the touch-friendly path; HTML5 drag still works
+                        // on desktop alongside it.
+                        playerEl.addEventListener('click', (e) => {
+                            const r = playerEl.getBoundingClientRect();
+                            this._showPlayerContextMenu(player, r.right, r.top);
+                        });
                         this._bindSlotDrag(playerEl, 'bench');
                         benchList.appendChild(playerEl);
                     });
@@ -6589,8 +6977,12 @@
                 this.isRunning = false;
                 if (this.matchFlow) { this.matchFlow.stop(); this.matchFlow = null; }
                 document.getElementById('stats').style.display = 'grid';
-                document.getElementById('pauseBtn').style.display = 'none';
-                document.getElementById('endBtn').style.display = 'block';
+                // pauseBtn + endBtn were removed from the match view in favour of
+                // the header Pause control. Lookups stay optional so old DOM (if
+                // any caller re-injects it) still works.
+                document.getElementById('pauseBtn')?.style?.setProperty('display', 'none');
+                document.getElementById('endBtn')?.style?.setProperty('display', 'block');
+                this._refreshTopMenuState();
 
                 this._finalizePlayerStats();   // close minute counters for everyone still on
                 this._computeAllRatings();     // 1.0–10.0 rating for every featured player
@@ -6653,8 +7045,21 @@
                             cpuLineup:    snapTeam(this.cpuTeam),
                         });
                         if (this.playerTeam) {
+                            // Carry per-match goals/assists onto each player's
+                            // career counter (top-level p.goals/p.assists) before
+                            // saving, since live-match increments target the
+                            // shallow onField copies, not the canonical roster.
+                            this._mergeMatchStatsIntoCareer(this.playerTeam);
                             GameStorage.savePlayerTeam(this.playerTeam.serialize());
                         }
+                        if (this.cpuTeam) {
+                            this._mergeMatchStatsIntoCareer(this.cpuTeam);
+                        }
+                        // Persist the league so the CPU club's roster (now with
+                        // updated per-player career goals/assists from this match)
+                        // is available to the next render of the leaderboard.
+                        const league = GameStorage.loadLeague?.();
+                        if (Array.isArray(league)) GameStorage.saveLeague(league);
                     } catch (e) {
                         console.warn('endMatch: persist failed', e?.message);
                     }
@@ -6692,7 +7097,7 @@
                         ${players.map(({ p, s }) => {
                             const dim = v => v === 0 ? ' zero' : '';
                             return `
-                                <div class="player-stats-row" title="${this._positionDisplay(p)}">
+                                <div class="player-stats-row" title="${this._positionDisplayPlain(p)}">
                                     <span class="ps-name">${p.flag ? p.flag + ' ' : ''}${p.name}</span>
                                     <span class="ps-num">${Math.round(s.minutesPlayed)}'</span>
                                     <span class="ps-num${dim(s.shots)}">${s.shots}</span>
@@ -6874,10 +7279,11 @@
                     playerPossession: 50, cpuPossession: 50,
                 };
 
-                document.getElementById('pauseBtn').style.display = 'block';
-                document.getElementById('pauseBtn').textContent = 'Pause';
+                // pauseBtn + endBtn were removed from the match view; optional-chained.
+                document.getElementById('pauseBtn')?.style?.setProperty('display', 'block');
+                const pb = document.getElementById('pauseBtn'); if (pb) pb.textContent = 'Pause';
                 document.getElementById('manageBtn').style.display = 'none';
-                document.getElementById('endBtn').style.display = 'none';
+                document.getElementById('endBtn')?.style?.setProperty('display', 'none');
                 document.getElementById('stats').style.display = 'none';
                 document.getElementById('eventsLog').innerHTML = '<div class="event pass">⚪ Match started! Possession: 50-50</div>';
                 // Reset tactic buttons to defaults

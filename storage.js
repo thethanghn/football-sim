@@ -99,7 +99,22 @@ class GameStorage {
     static saveLeague(clubs) { return this._write(this.KEYS.league, clubs); }
 
     // ─── Fixtures (round-robin schedule for the league) ─────────────────
-    static loadFixtures() { return this._read(this.KEYS.fixtures); }
+    // Load auto-heals old single-leg saves by appending the mirror second leg
+    // (older versions of LeagueGenerator only produced n-1 rounds). Writes the
+    // upgraded list back so subsequent loads short-circuit.
+    static loadFixtures() {
+        const rounds = this._read(this.KEYS.fixtures);
+        if (!rounds || !rounds.length || typeof window === 'undefined' || !window.LeagueGenerator) {
+            return rounds;
+        }
+        const league = this.loadLeague();
+        const fixed  = window.LeagueGenerator.backfillSecondLegIfMissing(rounds, league);
+        if (fixed !== rounds) {
+            this._write(this.KEYS.fixtures, fixed);
+            console.log(`Fixtures upgraded: ${rounds.length} → ${fixed.length} rounds (second leg backfilled)`);
+        }
+        return fixed;
+    }
     static saveFixtures(rounds) { return this._write(this.KEYS.fixtures, rounds); }
 
     // ─── In-game calendar ──────────────────────────────────────────────
